@@ -19,3 +19,7 @@ enable_testing()
 add_executable(test_matching tests/test_matching.cpp)
 target_link_libraries(test_matching PRIVATE internpath_matching)
 add_test(NAME MatchingEngine COMMAND test_matching)
+
+add_executable(test_dynamic_array tests/test_dynamic_array.cpp)
+target_include_directories(test_dynamic_array PRIVATE include)
+add_test(NAME DynamicArray COMMAND test_dynamic_array)
