@@ -11,6 +11,7 @@ template<class T>
 class DynamicArray {
 public:
     using size_type = std::size_t;
+    using value_type = T;
 
     DynamicArray() = default;
 
@@ -34,6 +35,27 @@ public:
         data_ = fresh;
         size_ = items.size();
         capacity_ = items.size();
+    }
+
+    explicit DynamicArray(size_type count, const T& value = T()) {
+        if (count == 0) return;
+        T* fresh = alloc_.allocate(count);
+        size_type constructed = 0;
+        try {
+            for (; constructed < count; ++constructed) {
+                std::allocator_traits<decltype(alloc_)>::construct(
+                    alloc_, fresh + constructed, value);
+            }
+        } catch (...) {
+            for (size_type j = 0; j < constructed; ++j) {
+                std::allocator_traits<decltype(alloc_)>::destroy(alloc_, fresh + j);
+            }
+            alloc_.deallocate(fresh, count);
+            throw;
+        }
+        data_ = fresh;
+        size_ = count;
+        capacity_ = count;
     }
 
     ~DynamicArray() {
@@ -180,6 +202,22 @@ public:
         deallocate();
         data_ = fresh;
         capacity_ = size_;
+    }
+
+    void resize(size_type new_size, const T& value = T()) {
+        if (new_size < size_) {
+            while (size_ > new_size) {
+                --size_;
+                std::allocator_traits<decltype(alloc_)>::destroy(alloc_, data_ + size_);
+            }
+        } else if (new_size > size_) {
+            reserve(new_size);
+            while (size_ < new_size) {
+                std::allocator_traits<decltype(alloc_)>::construct(
+                    alloc_, data_ + size_, value);
+                ++size_;
+            }
+        }
     }
 
     template<class... Args>

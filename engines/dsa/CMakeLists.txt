@@ -23,3 +23,33 @@ add_test(NAME MatchingEngine COMMAND test_matching)
 add_executable(test_dynamic_array tests/test_dynamic_array.cpp)
 target_include_directories(test_dynamic_array PRIVATE include)
 add_test(NAME DynamicArray COMMAND test_dynamic_array)
+
+add_executable(test_singly_linked_list tests/test_singly_linked_list.cpp)
+target_include_directories(test_singly_linked_list PRIVATE include)
+add_test(NAME SinglyLinkedList COMMAND test_singly_linked_list)
+
+add_executable(test_doubly_linked_list tests/test_doubly_linked_list.cpp)
+target_include_directories(test_doubly_linked_list PRIVATE include)
+add_test(NAME DoublyLinkedList COMMAND test_doubly_linked_list)
+
+add_executable(test_stack tests/test_stack.cpp)
+target_include_directories(test_stack PRIVATE include)
+add_test(NAME Stack COMMAND test_stack)
+
+add_executable(test_circular_queue tests/test_circular_queue.cpp)
+target_include_directories(test_circular_queue PRIVATE include)
+add_test(NAME CircularQueue COMMAND test_circular_queue)
+
+add_executable(test_hash_table tests/test_hash_table.cpp)
+target_include_directories(test_hash_table PRIVATE include)
+add_test(NAME HashTable COMMAND test_hash_table)
+
+add_executable(test_avl_tree tests/test_avl_tree.cpp)
+target_include_directories(test_avl_tree PRIVATE include)
+add_test(NAME AVLTree COMMAND test_avl_tree)
+
+add_executable(test_catalogue tests/test_catalogue.cpp)
+target_include_directories(test_catalogue PRIVATE include)
+add_test(NAME InternshipCatalogue COMMAND test_catalogue)
+
+
