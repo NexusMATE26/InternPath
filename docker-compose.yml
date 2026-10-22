@@ -1,0 +1,15 @@
+# Optional Phase 2 development database. No API tables/migrations are wired yet.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: internpath
+      POSTGRES_USER: internpath
+      POSTGRES_PASSWORD: devonly
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - internpath_pgdata:/var/lib/postgresql/data
+volumes:
+  internpath_pgdata:

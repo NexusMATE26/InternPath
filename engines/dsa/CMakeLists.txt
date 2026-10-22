@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.20)
+project(InternPathDSA VERSION 0.1.0 LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(internpath_matching STATIC src/matching.cpp)
+target_include_directories(internpath_matching PUBLIC include)
+if(MSVC)
+    target_compile_options(internpath_matching PRIVATE /W4)
+else()
+    target_compile_options(internpath_matching PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+add_executable(internpath_dsa src/main.cpp)
+target_link_libraries(internpath_dsa PRIVATE internpath_matching)
+
+enable_testing()
+add_executable(test_matching tests/test_matching.cpp)
+target_link_libraries(test_matching PRIVATE internpath_matching)
+add_test(NAME MatchingEngine COMMAND test_matching)

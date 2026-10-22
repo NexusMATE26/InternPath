@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+# Node
+node_modules/
+dist/
+# Build
+build/
+CMakeFiles/
+# Environment & IDE
+.env
+.env.local
+.vscode/
+.idea/
+.DS_Store
+# Data never commit real student documents
+data/private/
