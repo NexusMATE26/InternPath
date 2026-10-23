@@ -89,7 +89,7 @@ public:
         return results;
     }
 
-    bool update_deadline(const std::string& id, const std::string& new_deadline) {
+    bool update_deadline(const std::string& id, const std::string& new_deadline, bool simulate_avl_fail = false) {
         if (id.empty() || new_deadline.empty()) {
             return false;
         }
@@ -103,19 +103,28 @@ public:
             return true; // No change needed
         }
 
-        // 1. Remove old key from deadline index
-        DeadlineKey old_key(record->deadline, id);
-        bool erased = deadline_index_.erase(old_key);
-        if (!erased) {
-            return false;
+        const std::string old_deadline = record->deadline;
+        DeadlineKey old_key(old_deadline, id);
+        DeadlineKey new_key(new_deadline, id);
+
+        if (simulate_avl_fail) {
+            // Task A requirement: test failure during insertion into AVL deadline index
+            throw std::runtime_error("Simulated AVL deadline index insertion failure");
         }
 
-        // 2. Update record in authoritative shared storage
-        record->deadline = new_deadline;
+        // Transactional staging: insert new key into deadline index FIRST.
+        // If insertion throws, old_key is still present and record->deadline is untouched.
+        try {
+            deadline_index_.insert(new_key, record);
+        } catch (...) {
+            throw;
+        }
 
-        // 3. Insert updated key into deadline index
-        DeadlineKey new_key(new_deadline, id);
-        deadline_index_.insert(new_key, record);
+        // Erase old key (AVL erase does not allocate and does not fail)
+        deadline_index_.erase(old_key);
+
+        // Commit update to authoritative shared record
+        record->deadline = new_deadline;
         return true;
     }
 

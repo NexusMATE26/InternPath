@@ -2,6 +2,7 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <iostream>
@@ -192,48 +193,63 @@ int main() {
     }
     assert(ThrowOnCopy::alive_count == 0);
 
-    // 10. Benchmark vs std::unordered_map
+    // 10. Multi-trial Benchmark with Checksum & Median vs std::unordered_map
     const int kBenchN = 20000;
-    std::cout << "--- Benchmark: HashTable vs std::unordered_map (" << kBenchN << " items) ---\n";
+    const int kTrials = 5;
+    std::cout << "--- Benchmark: HashTable vs std::unordered_map (" << kBenchN << " items, " << kTrials << " trials) ---\n";
 
-    // Custom HashTable
-    auto t0 = std::chrono::high_resolution_clock::now();
-    HashTable<int, int> custom_ht;
-    for (int i = 0; i < kBenchN; ++i) {
-        custom_ht.insert(i, i ^ 0x55AA);
+    std::vector<double> custom_insert_times;
+    std::vector<double> custom_lookup_times;
+    std::vector<double> std_insert_times;
+    std::vector<double> std_lookup_times;
+    uint64_t custom_checksum = 0;
+    uint64_t std_checksum = 0;
+
+    for (int t = 0; t < kTrials; ++t) {
+        // Custom HashTable
+        auto t0 = std::chrono::high_resolution_clock::now();
+        HashTable<int, int> custom_ht;
+        for (int i = 0; i < kBenchN; ++i) {
+            custom_ht.insert(i, i ^ 0x55AA);
+        }
+        auto t1 = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < kBenchN; ++i) {
+            const int* v = custom_ht.find(i);
+            if (v) custom_checksum += static_cast<uint64_t>(*v);
+        }
+        auto t2 = std::chrono::high_resolution_clock::now();
+        custom_insert_times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+        custom_lookup_times.push_back(std::chrono::duration<double, std::milli>(t2 - t1).count());
+
+        // std::unordered_map
+        auto t3 = std::chrono::high_resolution_clock::now();
+        std::unordered_map<int, int> std_umap;
+        for (int i = 0; i < kBenchN; ++i) {
+            std_umap.insert({i, i ^ 0x55AA});
+        }
+        auto t4 = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < kBenchN; ++i) {
+            auto it = std_umap.find(i);
+            if (it != std_umap.end()) std_checksum += static_cast<uint64_t>(it->second);
+        }
+        auto t5 = std::chrono::high_resolution_clock::now();
+        std_insert_times.push_back(std::chrono::duration<double, std::milli>(t4 - t3).count());
+        std_lookup_times.push_back(std::chrono::duration<double, std::milli>(t5 - t4).count());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
-    int custom_hits = 0;
-    for (int i = 0; i < kBenchN; ++i) {
-        if (custom_ht.contains(i)) ++custom_hits;
-    }
-    auto t2 = std::chrono::high_resolution_clock::now();
 
-    auto custom_insert_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    auto custom_lookup_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
+    assert(custom_checksum == std_checksum);
+    std::sort(custom_insert_times.begin(), custom_insert_times.end());
+    std::sort(custom_lookup_times.begin(), custom_lookup_times.end());
+    std::sort(std_insert_times.begin(), std_insert_times.end());
+    std::sort(std_lookup_times.begin(), std_lookup_times.end());
 
-    // std::unordered_map
-    auto t3 = std::chrono::high_resolution_clock::now();
-    std::unordered_map<int, int> std_umap;
-    for (int i = 0; i < kBenchN; ++i) {
-        std_umap.insert({i, i ^ 0x55AA});
-    }
-    auto t4 = std::chrono::high_resolution_clock::now();
-    int std_hits = 0;
-    for (int i = 0; i < kBenchN; ++i) {
-        if (std_umap.find(i) != std_umap.end()) ++std_hits;
-    }
-    auto t5 = std::chrono::high_resolution_clock::now();
+    double custom_insert_med = custom_insert_times[kTrials / 2];
+    double custom_lookup_med = custom_lookup_times[kTrials / 2];
+    double std_insert_med = std_insert_times[kTrials / 2];
+    double std_lookup_med = std_lookup_times[kTrials / 2];
 
-    auto std_insert_ms = std::chrono::duration<double, std::milli>(t4 - t3).count();
-    auto std_lookup_ms = std::chrono::duration<double, std::milli>(t5 - t4).count();
-
-    assert(custom_hits == kBenchN && std_hits == kBenchN);
-    std::cout << "HashTable insert: " << custom_insert_ms << " ms | lookup: " << custom_lookup_ms << " ms\n";
-    std::cout << "std::unordered_map insert: " << std_insert_ms << " ms | lookup: " << std_lookup_ms << " ms\n";
-    std::cout << "HashTable final buckets: " << custom_ht.bucket_count()
-              << " | load_factor: " << custom_ht.load_factor()
-              << " | max_bucket_len: " << custom_ht.max_bucket_length() << "\n";
+    std::cout << "HashTable (median): insert " << custom_insert_med << " ms | lookup " << custom_lookup_med << " ms\n";
+    std::cout << "std::unordered_map (median): insert " << std_insert_med << " ms | lookup " << std_lookup_med << " ms\n";
     std::cout << "HashTable tests passed\n";
     return 0;
 }

@@ -2,6 +2,7 @@
 #ifdef NDEBUG
 #undef NDEBUG
 #endif
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <iostream>
@@ -223,51 +224,75 @@ int main() {
         assert(copy.empty());
     }
 
-    // 12. Benchmark vs std::map
+    // 12. Multi-trial Benchmark with Checksum & Median vs std::map
     const int kBenchN = 20000;
-    std::cout << "--- Benchmark: AVLTree vs std::map (" << kBenchN << " items) ---\n";
+    const int kTrials = 5;
+    std::cout << "--- Benchmark: AVLTree vs std::map (" << kBenchN << " items, " << kTrials << " trials) ---\n";
 
-    // Custom AVLTree
-    auto t0 = std::chrono::high_resolution_clock::now();
-    AVLTree<int, int> custom_avl;
-    for (int i = 0; i < kBenchN; ++i) {
-        custom_avl.insert(i, i ^ 0xAA55);
+    std::vector<double> custom_insert_times;
+    std::vector<double> custom_lookup_times;
+    std::vector<double> std_insert_times;
+    std::vector<double> std_lookup_times;
+    uint64_t custom_checksum = 0;
+    uint64_t std_checksum = 0;
+
+    int last_height = 0;
+    AVLTree<int, int>::RotationStats last_rotations;
+
+    for (int t = 0; t < kTrials; ++t) {
+        // Custom AVLTree
+        auto t0 = std::chrono::high_resolution_clock::now();
+        AVLTree<int, int> custom_avl;
+        for (int i = 0; i < kBenchN; ++i) {
+            custom_avl.insert(i, i ^ 0xAA55);
+        }
+        auto t1 = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < kBenchN; ++i) {
+            const int* v = custom_avl.find(i);
+            if (v) custom_checksum += static_cast<uint64_t>(*v);
+        }
+        auto t2 = std::chrono::high_resolution_clock::now();
+        custom_insert_times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+        custom_lookup_times.push_back(std::chrono::duration<double, std::milli>(t2 - t1).count());
+
+        last_height = custom_avl.height();
+        last_rotations = custom_avl.rotation_stats();
+
+        // std::map (Red-Black Tree)
+        auto t3 = std::chrono::high_resolution_clock::now();
+        std::map<int, int> std_map;
+        for (int i = 0; i < kBenchN; ++i) {
+            std_map.insert({i, i ^ 0xAA55});
+        }
+        auto t4 = std::chrono::high_resolution_clock::now();
+        for (int i = 0; i < kBenchN; ++i) {
+            auto it = std_map.find(i);
+            if (it != std_map.end()) std_checksum += static_cast<uint64_t>(it->second);
+        }
+        auto t5 = std::chrono::high_resolution_clock::now();
+        std_insert_times.push_back(std::chrono::duration<double, std::milli>(t4 - t3).count());
+        std_lookup_times.push_back(std::chrono::duration<double, std::milli>(t5 - t4).count());
     }
-    auto t1 = std::chrono::high_resolution_clock::now();
-    int custom_hits = 0;
-    for (int i = 0; i < kBenchN; ++i) {
-        if (custom_avl.contains(i)) ++custom_hits;
-    }
-    auto t2 = std::chrono::high_resolution_clock::now();
 
-    auto custom_insert_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    auto custom_lookup_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
+    assert(custom_checksum == std_checksum);
+    std::sort(custom_insert_times.begin(), custom_insert_times.end());
+    std::sort(custom_lookup_times.begin(), custom_lookup_times.end());
+    std::sort(std_insert_times.begin(), std_insert_times.end());
+    std::sort(std_lookup_times.begin(), std_lookup_times.end());
 
-    // std::map (Red-Black Tree)
-    auto t3 = std::chrono::high_resolution_clock::now();
-    std::map<int, int> std_map;
-    for (int i = 0; i < kBenchN; ++i) {
-        std_map.insert({i, i ^ 0xAA55});
-    }
-    auto t4 = std::chrono::high_resolution_clock::now();
-    int std_hits = 0;
-    for (int i = 0; i < kBenchN; ++i) {
-        if (std_map.find(i) != std_map.end()) ++std_hits;
-    }
-    auto t5 = std::chrono::high_resolution_clock::now();
+    double custom_insert_med = custom_insert_times[kTrials / 2];
+    double custom_lookup_med = custom_lookup_times[kTrials / 2];
+    double std_insert_med = std_insert_times[kTrials / 2];
+    double std_lookup_med = std_lookup_times[kTrials / 2];
 
-    auto std_insert_ms = std::chrono::duration<double, std::milli>(t4 - t3).count();
-    auto std_lookup_ms = std::chrono::duration<double, std::milli>(t5 - t4).count();
-
-    assert(custom_hits == kBenchN && std_hits == kBenchN);
-    std::cout << "AVLTree insert: " << custom_insert_ms << " ms | lookup: " << custom_lookup_ms << " ms\n";
-    std::cout << "std::map insert: " << std_insert_ms << " ms | lookup: " << std_lookup_ms << " ms\n";
-    std::cout << "AVLTree final height: " << custom_avl.height()
-              << " | total rotations: " << custom_avl.rotation_stats().total()
-              << " (LL=" << custom_avl.rotation_stats().ll_rotations
-              << ", RR=" << custom_avl.rotation_stats().rr_rotations
-              << ", LR=" << custom_avl.rotation_stats().lr_rotations
-              << ", RL=" << custom_avl.rotation_stats().rl_rotations << ")\n";
+    std::cout << "AVLTree (median): insert " << custom_insert_med << " ms | lookup " << custom_lookup_med << " ms\n";
+    std::cout << "std::map (median): insert " << std_insert_med << " ms | lookup " << std_lookup_med << " ms\n";
+    std::cout << "AVLTree final height: " << last_height
+              << " | total rotations: " << last_rotations.total()
+              << " (LL=" << last_rotations.ll_rotations
+              << ", RR=" << last_rotations.rr_rotations
+              << ", LR=" << last_rotations.lr_rotations
+              << ", RL=" << last_rotations.rl_rotations << ")\n";
 
     std::cout << "AVLTree tests passed\n";
     return 0;

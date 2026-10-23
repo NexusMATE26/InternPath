@@ -17,3 +17,6 @@ CMakeFiles/
 .DS_Store
 # Data never commit real student documents
 data/private/
+*.db
+*.sqlite3
+*.tsbuildinfo

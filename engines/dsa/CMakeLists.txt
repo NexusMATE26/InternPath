@@ -52,4 +52,12 @@ add_executable(test_catalogue tests/test_catalogue.cpp)
 target_include_directories(test_catalogue PRIVATE include)
 add_test(NAME InternshipCatalogue COMMAND test_catalogue)
 
+add_executable(test_skill_graph tests/test_skill_graph.cpp)
+target_include_directories(test_skill_graph PRIVATE include)
+add_test(NAME SkillGraph COMMAND test_skill_graph)
+
+add_executable(test_learning_path tests/test_learning_path.cpp)
+target_include_directories(test_learning_path PRIVATE include)
+add_test(NAME LearningPath COMMAND test_learning_path)
+
 

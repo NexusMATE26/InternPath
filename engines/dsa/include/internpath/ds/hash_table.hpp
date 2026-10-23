@@ -36,6 +36,153 @@ public:
     using hasher = Hash;
     using key_equal = KeyEqual;
 
+    class const_iterator {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = Entry;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const Entry*;
+        using reference = const Entry&;
+
+        const_iterator() = default;
+        const_iterator(const DynamicArray<Bucket>* buckets, size_type bucket_idx, typename Bucket::const_iterator node_it)
+            : buckets_(buckets), bucket_idx_(bucket_idx), node_it_(node_it) {
+            advance_to_valid();
+        }
+
+        reference operator*() const { return *node_it_; }
+        pointer operator->() const { return &(*node_it_); }
+
+        const_iterator& operator++() {
+            if (buckets_ && bucket_idx_ < buckets_->size()) {
+                ++node_it_;
+                advance_to_valid();
+            }
+            return *this;
+        }
+
+        const_iterator operator++(int) {
+            const_iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        bool operator==(const const_iterator& other) const {
+            if (!buckets_ || bucket_idx_ >= buckets_->size()) {
+                return !other.buckets_ || other.bucket_idx_ >= other.buckets_->size();
+            }
+            return buckets_ == other.buckets_ &&
+                   bucket_idx_ == other.bucket_idx_ &&
+                   node_it_ == other.node_it_;
+        }
+
+        bool operator!=(const const_iterator& other) const {
+            return !(*this == other);
+        }
+
+    private:
+        void advance_to_valid() {
+            if (!buckets_) return;
+            while (bucket_idx_ < buckets_->size()) {
+                if (node_it_ != (*buckets_)[bucket_idx_].end()) {
+                    return;
+                }
+                ++bucket_idx_;
+                if (bucket_idx_ < buckets_->size()) {
+                    node_it_ = (*buckets_)[bucket_idx_].begin();
+                }
+            }
+        }
+
+        const DynamicArray<Bucket>* buckets_ = nullptr;
+        size_type bucket_idx_ = 0;
+        typename Bucket::const_iterator node_it_{};
+    };
+
+    class iterator {
+    public:
+        using iterator_category = std::forward_iterator_tag;
+        using value_type = Entry;
+        using difference_type = std::ptrdiff_t;
+        using pointer = Entry*;
+        using reference = Entry&;
+
+        iterator() = default;
+        iterator(DynamicArray<Bucket>* buckets, size_type bucket_idx, typename Bucket::iterator node_it)
+            : buckets_(buckets), bucket_idx_(bucket_idx), node_it_(node_it) {
+            advance_to_valid();
+        }
+
+        reference operator*() const { return *node_it_; }
+        pointer operator->() const { return &(*node_it_); }
+
+        iterator& operator++() {
+            if (buckets_ && bucket_idx_ < buckets_->size()) {
+                ++node_it_;
+                advance_to_valid();
+            }
+            return *this;
+        }
+
+        iterator operator++(int) {
+            iterator tmp = *this;
+            ++(*this);
+            return tmp;
+        }
+
+        bool operator==(const iterator& other) const {
+            if (!buckets_ || bucket_idx_ >= buckets_->size()) {
+                return !other.buckets_ || other.bucket_idx_ >= other.buckets_->size();
+            }
+            return buckets_ == other.buckets_ &&
+                   bucket_idx_ == other.bucket_idx_ &&
+                   node_it_ == other.node_it_;
+        }
+
+        bool operator!=(const iterator& other) const {
+            return !(*this == other);
+        }
+
+    private:
+        void advance_to_valid() {
+            if (!buckets_) return;
+            while (bucket_idx_ < buckets_->size()) {
+                if (node_it_ != (*buckets_)[bucket_idx_].end()) {
+                    return;
+                }
+                ++bucket_idx_;
+                if (bucket_idx_ < buckets_->size()) {
+                    node_it_ = (*buckets_)[bucket_idx_].begin();
+                }
+            }
+        }
+
+        DynamicArray<Bucket>* buckets_ = nullptr;
+        size_type bucket_idx_ = 0;
+        typename Bucket::iterator node_it_{};
+    };
+
+    iterator begin() {
+        if (buckets_.empty()) return end();
+        return iterator(&buckets_, 0, buckets_[0].begin());
+    }
+
+    iterator end() {
+        return iterator(&buckets_, buckets_.size(), typename Bucket::iterator());
+    }
+
+    const_iterator begin() const {
+        if (buckets_.empty()) return end();
+        return const_iterator(&buckets_, 0, buckets_[0].begin());
+    }
+
+    const_iterator end() const {
+        return const_iterator(&buckets_, buckets_.size(), typename Bucket::const_iterator());
+    }
+
+    const_iterator cbegin() const { return begin(); }
+    const_iterator cend() const { return end(); }
+
     static constexpr size_type kDefaultInitialBuckets = 16;
     static constexpr float kDefaultMaxLoadFactor = 0.75f;
 
@@ -138,6 +285,19 @@ public:
         }
     }
 
+    bool check_invariants() const noexcept {
+        size_type total_entries = 0;
+        for (size_type i = 0; i < buckets_.size(); ++i) {
+            total_entries += buckets_[i].size();
+            for (const auto& entry : buckets_[i]) {
+                if (bucket_index(entry.key) != i) {
+                    return false;
+                }
+            }
+        }
+        return total_entries == size_;
+    }
+
     void rehash(size_type new_bucket_count) {
         if (new_bucket_count < 8) new_bucket_count = 8;
         size_type min_buckets = static_cast<size_type>(std::ceil(static_cast<float>(size_) / max_load_factor_));
@@ -145,12 +305,12 @@ public:
         if (new_bucket_count == buckets_.size()) return;
 
         DynamicArray<Bucket> new_buckets(new_bucket_count);
+        // Exception safety: stage all entries into new_buckets first.
+        // If an allocation fails, buckets_ is completely untouched (strong guarantee).
         for (size_type i = 0; i < buckets_.size(); ++i) {
-            while (!buckets_[i].empty()) {
-                Entry e = std::move(buckets_[i].front());
-                buckets_[i].pop_front();
-                size_type new_idx = hash_(e.key) % new_bucket_count;
-                new_buckets[new_idx].push_front(std::move(e));
+            for (const auto& entry : buckets_[i]) {
+                size_type new_idx = hash_(entry.key) % new_bucket_count;
+                new_buckets[new_idx].emplace_front(entry.key, entry.value);
             }
         }
         buckets_.swap(new_buckets);

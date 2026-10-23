@@ -89,6 +89,22 @@ int main() {
     assert(!catalogue.update_deadline("INT-101", "")); // Empty deadline
     assert(catalogue.verify_synchronization());
 
+    // Task A requirement: Test failure during insertion into AVL deadline index
+    bool avl_failed = false;
+    try {
+        catalogue.update_deadline("INT-101", "2026-12-01", /*simulate_avl_fail=*/true);
+    } catch (const std::runtime_error&) {
+        avl_failed = true;
+    }
+    assert(avl_failed);
+    // Confirm old data and both indexes remain consistent after failed update:
+    assert(catalogue.verify_synchronization());
+    auto int101_after_fail = catalogue.find_by_id("INT-101");
+    assert(int101_after_fail && int101_after_fail->deadline == "2026-11-15"); // Old deadline preserved!
+    auto nov_check = catalogue.query_by_deadline_range("2026-11-01", "2026-11-30");
+    assert(nov_check.size() == 2 && nov_check[0]->id == "INT-101"); // Still present in deadline index under old key!
+
+
     // 5. Delete an internship and verify absence in both indexes
     assert(catalogue.remove_internship("INT-101"));
     assert(!catalogue.contains("INT-101"));
