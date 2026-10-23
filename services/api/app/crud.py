@@ -190,6 +190,9 @@ def get_or_create_dev_student(db: Session) -> Student:
 
 def get_student_skills(db: Session, student_id: int) -> list[dict[str, Any]]:
     """Return list of skill competence records for a student."""
+    student = db.query(Student).filter(Student.id == student_id).first()
+    is_demo_student = student.is_demo if student else True
+
     skills_records = (
         db.query(StudentSkill, Skill)
         .join(Skill, StudentSkill.skill_id == Skill.id)
@@ -198,6 +201,10 @@ def get_student_skills(db: Session, student_id: int) -> list[dict[str, Any]]:
     )
     results = []
     for ss, sk in skills_records:
+        ver_source = "unverified"
+        if ss.is_verified:
+            ver_source = "curated_demo" if is_demo_student else "independent_assessment"
+
         results.append({
             "skill_id": ss.skill_id,
             "skill_name": sk.name,
@@ -205,6 +212,7 @@ def get_student_skills(db: Session, student_id: int) -> list[dict[str, Any]]:
             "declared_level": ss.declared_level,
             "verified_level": ss.verified_level,
             "is_verified": ss.is_verified,
+            "verification_source": ver_source,
             "updated_at": ss.updated_at.isoformat() if ss.updated_at else None,
         })
     return results
@@ -226,6 +234,10 @@ def get_student_profile(db: Session, student_id: int) -> Optional[dict[str, Any]
 
     formatted_skills = []
     for ss, sk in skills_records:
+        ver_source = "unverified"
+        if ss.is_verified:
+            ver_source = "curated_demo" if student.is_demo else "independent_assessment"
+
         formatted_skills.append({
             "skill_id": ss.skill_id,
             "skill_name": sk.name,
@@ -233,6 +245,7 @@ def get_student_profile(db: Session, student_id: int) -> Optional[dict[str, Any]
             "declared_level": ss.declared_level,
             "verified_level": ss.verified_level,
             "is_verified": ss.is_verified,
+            "verification_source": ver_source,
             "updated_at": ss.updated_at.isoformat() if ss.updated_at else None,
         })
 
@@ -318,35 +331,27 @@ def update_student_profile(
 
             if lvl is None:
                 lvl = 0
-            is_ver = bool(item.get("is_verified", False))
-            ver_lvl = item.get("verified_level")
-            if ver_lvl is None:
-                ver_lvl = lvl if is_ver else 0
 
             if not 0 <= lvl <= 3:
                 raise ValueError(f"Declared level for skill {sid} must be between 0 and 3.")
-            if not 0 <= ver_lvl <= 3:
-                raise ValueError(f"Verified level for skill {sid} must be between 0 and 3.")
 
-
+            # SECURITY BOUNDARY (R1.4):
+            # Student self-assessment profile updates can ONLY modify `declared_level`.
+            # Privileged verification fields (`is_verified`, `verified_level`) must NEVER
+            # be created, upgraded, or lowered via student-supplied payloads.
+            # Any verification values passed in `item` are strictly ignored on the server.
             if sid in current_skills:
                 rec = current_skills[sid]
                 rec.declared_level = lvl
-                # A1 Safeguard: Independently verified skills must not be downgraded or erased
-                # by student self-assessment updates. Preserve verified status and level if already verified.
-                if rec.is_verified:
-                    if is_ver and ver_lvl > rec.verified_level:
-                        rec.verified_level = ver_lvl
-                else:
-                    rec.verified_level = ver_lvl
-                    rec.is_verified = is_ver
+                # rec.is_verified and rec.verified_level remain strictly immutable to student updates
             else:
+                # Newly added student skills are strictly self-reported (unverified)
                 new_rec = StudentSkill(
                     student_id=student_id,
                     skill_id=sid,
                     declared_level=lvl,
-                    verified_level=ver_lvl,
-                    is_verified=is_ver,
+                    verified_level=0,
+                    is_verified=False,
                 )
                 db.add(new_rec)
 

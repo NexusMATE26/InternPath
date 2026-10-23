@@ -551,3 +551,136 @@ def test_cpp_subprocess_timeout():
         assert "execute" in response.json()["detail"].lower()
 
 
+# ---------------------------------------------------------
+# Refinement R1.4: Verification Security & Privilege Escalation Tests
+# ---------------------------------------------------------
+
+def test_unverified_skill_cannot_be_upgraded_by_student_payload():
+    """Unverified skill cannot be escalated to verified status via student self-assessment."""
+    # Skill 7 is initially unverified (is_verified=False, verified_level=0)
+    prof_before = client.get("/v1/profile").json()
+    s7_before = next((s for s in prof_before["skills"] if s["skill_id"] == 7), None)
+    if s7_before:
+        assert s7_before["is_verified"] is False
+
+    # Student attempts privilege escalation on skill 7
+    malicious_payload = {
+        "skills": [
+            {"skill_id": 7, "declared_level": 3, "is_verified": True, "verified_level": 3},
+        ]
+    }
+    response = client.put("/v1/profile", json=malicious_payload)
+    assert response.status_code == 200
+
+    prof_after = client.get("/v1/profile").json()
+    s7_after = next(s for s in prof_after["skills"] if s["skill_id"] == 7)
+    # Declared level can be updated by student
+    assert s7_after["declared_level"] == 3
+    # Server boundary MUST reject or ignore verification escalation
+    assert s7_after["is_verified"] is False
+    assert s7_after["verified_level"] == 0
+    assert s7_after["verification_source"] == "unverified"
+
+
+def test_verified_level_cannot_be_increased_by_student_payload():
+    """Independently verified skill level cannot be increased via student self-assessment."""
+    prof_before = client.get("/v1/profile").json()
+    s1_before = next(s for s in prof_before["skills"] if s["skill_id"] == 1)
+    assert s1_before["is_verified"] is True
+    initial_ver_lvl = s1_before["verified_level"]
+
+    # Student attempts to upgrade verified_level to 3
+    upgrade_payload = {
+        "skills": [
+            {"skill_id": 1, "declared_level": 3, "is_verified": True, "verified_level": 3},
+        ]
+    }
+    response = client.put("/v1/profile", json=upgrade_payload)
+    assert response.status_code == 200
+
+    prof_after = client.get("/v1/profile").json()
+    s1_after = next(s for s in prof_after["skills"] if s["skill_id"] == 1)
+    assert s1_after["declared_level"] == 3
+    assert s1_after["is_verified"] is True
+    # Verified level MUST NOT increase
+    assert s1_after["verified_level"] == initial_ver_lvl
+
+
+def test_verified_level_cannot_be_decreased_by_student_payload():
+    """Independently verified skill status/level cannot be decreased or erased by self-assessment."""
+    prof_before = client.get("/v1/profile").json()
+    s1_before = next(s for s in prof_before["skills"] if s["skill_id"] == 1)
+    assert s1_before["is_verified"] is True
+    initial_ver_lvl = s1_before["verified_level"]
+
+    # Student attempts to reset or downgrade verification
+    downgrade_payload = {
+        "skills": [
+            {"skill_id": 1, "declared_level": 1, "is_verified": False, "verified_level": 0},
+        ]
+    }
+    response = client.put("/v1/profile", json=downgrade_payload)
+    assert response.status_code == 200
+
+    prof_after = client.get("/v1/profile").json()
+    s1_after = next(s for s in prof_after["skills"] if s["skill_id"] == 1)
+    assert s1_after["declared_level"] == 1
+    assert s1_after["is_verified"] is True
+    assert s1_after["verified_level"] == initial_ver_lvl
+
+
+def test_existing_verification_survives_ordinary_self_assessment():
+    """Ordinary self-assessment rating updates safely preserve existing genuine verification."""
+    # Student rates skill without mentioning any verification fields
+    ordinary_payload = {
+        "skills": [
+            {"skill_id": 1, "declared_level": 2},
+            {"skill_id": 2, "declared_level": 2},
+        ]
+    }
+    response = client.put("/v1/profile", json=ordinary_payload)
+    assert response.status_code == 200
+
+    prof = client.get("/v1/profile").json()
+    skill_map = {s["skill_id"]: s for s in prof["skills"]}
+    assert skill_map[1]["is_verified"] is True
+    assert skill_map[1]["verified_level"] == 2
+    assert skill_map[2]["is_verified"] is True
+    assert skill_map[2]["verified_level"] == 2
+
+
+def test_new_student_skill_remains_self_reported():
+    """A new skill added by the student profile update is strictly self-reported."""
+    # Skill 5 (Distributed Systems Basics) is newly declared with an escalation attempt
+    new_skill_payload = {
+        "skills": [
+            {"skill_id": 5, "declared_level": 2, "is_verified": True, "verified_level": 2},
+        ]
+    }
+    response = client.put("/v1/profile", json=new_skill_payload)
+    assert response.status_code == 200
+
+    prof = client.get("/v1/profile").json()
+    s5 = next(s for s in prof["skills"] if s["skill_id"] == 5)
+    assert s5["declared_level"] == 2
+    assert s5["is_verified"] is False
+    assert s5["verified_level"] == 0
+    assert s5["verification_source"] == "unverified"
+
+
+def test_unauthorized_verification_request_safely_ignored():
+    """Extra unauthorized or malformed verification attributes in request are safely ignored."""
+    payload = {
+        "skills": [
+            {"skill_id": 7, "declared_level": 1, "is_verified": True, "verified_level": 2},
+        ]
+    }
+    response = client.put("/v1/profile", json=payload)
+    assert response.status_code == 200
+    prof = client.get("/v1/profile").json()
+    s7 = next(s for s in prof["skills"] if s["skill_id"] == 7)
+    assert s7["is_verified"] is False
+    assert s7["verified_level"] == 0
+
+
+

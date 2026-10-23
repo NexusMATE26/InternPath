@@ -21,6 +21,7 @@ interface StudentProfile {
     declared_level: number;
     verified_level: number;
     is_verified: boolean;
+    verification_source?: string;
   }>;
   evidence: EvidenceItem[];
 }
@@ -97,14 +98,16 @@ export default function App() {
             profile.skills.forEach((ps) => {
               initialMap[ps.skill_id] = {
                 level: ps.declared_level,
+                verified_level: ps.verified_level,
                 is_verified: ps.is_verified,
+                verification_source: ps.verification_source,
               };
             });
           } else {
             // Default fallback
-            if (initialMap[1]) initialMap[1] = { level: 2, is_verified: true };
-            if (initialMap[2]) initialMap[2] = { level: 2, is_verified: true };
-            if (initialMap[7]) initialMap[7] = { level: 1, is_verified: false };
+            if (initialMap[1]) initialMap[1] = { level: 2, verified_level: 2, is_verified: true, verification_source: 'curated_demo' };
+            if (initialMap[2]) initialMap[2] = { level: 2, verified_level: 2, is_verified: true, verification_source: 'curated_demo' };
+            if (initialMap[7]) initialMap[7] = { level: 1, verified_level: 0, is_verified: false, verification_source: 'unverified' };
           }
           setStudentSkills(initialMap);
         }
@@ -136,11 +139,16 @@ export default function App() {
     loadInitialData();
   }
 
-  // Update a single skill's declared or verified state
-  function handleSkillChange(skillId: number, level: number, isVerified: boolean) {
+  // Update a single skill's declared level (self-assessment only)
+  function handleSkillChange(skillId: number, level: number) {
     setStudentSkills((prev) => ({
       ...prev,
-      [skillId]: { level, is_verified: isVerified },
+      [skillId]: {
+        level,
+        verified_level: prev[skillId]?.verified_level ?? 0,
+        is_verified: prev[skillId]?.is_verified ?? false,
+        verification_source: prev[skillId]?.verification_source,
+      },
     }));
   }
 
@@ -150,11 +158,10 @@ export default function App() {
     setProfileSaveError('');
     setProfileSaveSuccess(false);
     try {
+      // Student self-assessment payload only submits declared_level
       const skillsPayload = Object.entries(studentSkills).map(([idStr, val]) => ({
         skill_id: Number(idStr),
         declared_level: val.level,
-        verified_level: val.is_verified ? val.level : 0,
-        is_verified: val.is_verified,
       }));
 
       const res = await fetch('/v1/profile', {
@@ -174,6 +181,7 @@ export default function App() {
       }
       setProfileSaveSuccess(true);
       setTimeout(() => setProfileSaveSuccess(false), 3500);
+      loadInitialData();
     } catch (err) {
       setProfileSaveError(err instanceof Error ? err.message : 'Failed to save profile');
     } finally {
@@ -375,6 +383,11 @@ export default function App() {
               saveSuccess={profileSaveSuccess}
               saveError={profileSaveError}
               onNavigateToRoadmap={() => setActiveTab('roadmap')}
+              onNavigateToCareers={() => setActiveTab('careers')}
+              selectedRoleId={selectedRoleId}
+              onSelectRole={(roleId) => setSelectedRoleId(roleId)}
+              roles={roles}
+              activeMission={activeMission}
             />
           )}
 
@@ -398,9 +411,14 @@ export default function App() {
         onClose={() => setAssistantOpen(false)}
         onNavigateToRoadmap={() => setActiveTab('roadmap')}
         onNavigateToCareers={() => setActiveTab('careers')}
+        onNavigateToReadiness={() => {
+          setAssistantOpen(false);
+          setActiveTab('readiness');
+        }}
         studentName={studentName}
         activeRoleTitle={selectedRole?.title}
         weeklyHours={weeklyHours}
+        activeMission={activeMission}
       />
 
       {/* Guided Student Onboarding Flow (R1.2) */}

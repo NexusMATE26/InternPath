@@ -174,6 +174,7 @@ class StudentSkillRecord(BaseModel):
     declared_level: int = Field(ge=0, le=3)
     verified_level: int = Field(ge=0, le=3)
     is_verified: bool
+    verification_source: str = "unverified"
     updated_at: Optional[str] = None
 
 
@@ -203,8 +204,10 @@ class StudentProfileResponse(BaseModel):
 class StudentSkillUpdateItem(BaseModel):
     skill_id: int
     declared_level: int = Field(ge=0, le=3)
+    # Privileged verification fields: accepted for backwards compatibility with legacy client
+    # payloads, but strictly ignored by the server boundary to prevent privilege escalation.
     verified_level: Optional[int] = Field(default=None, ge=0, le=3)
-    is_verified: Optional[bool] = False
+    is_verified: Optional[bool] = None
 
 
 class StudentProfileUpdateRequest(BaseModel):

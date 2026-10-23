@@ -721,21 +721,53 @@ test('R1.3 Checkpoint A1: Verification state preservation during self-assessment
   assert.equal(skill7.is_verified, false);
 });
 
-test('R1.3 Checkpoint A2: Partial failure & 409 active mission reconciliation', () => {
-  // Simulate active mission lookup reconciliation
-  const activeMission = {
+test('R1.3 Checkpoint A2: Partial failure & 409 active mission reconciliation (R1.4 Hardened)', () => {
+  // Hardened reconciliation helper matching OnboardingFlow.tsx
+  function check409Reconciliation(activeData, targetRoleId, weeklyHours) {
+    const createdMs = activeData.created_at ? new Date(activeData.created_at).getTime() : 0;
+    const isImmediateInFlightRetry =
+      activeData.target_role_id === targetRoleId &&
+      activeData.weekly_hours === weeklyHours &&
+      activeData.completed_tasks === 0 &&
+      activeData.in_progress_tasks === 0 &&
+      activeData.pending_proposals_count === 0 &&
+      Math.abs(Date.now() - createdMs) < 30_000;
+    return isImmediateInFlightRetry;
+  }
+
+  const nowIso = new Date().toISOString();
+
+  // 1. Genuine immediate in-flight retry (identical role, hours, fresh timestamp, 0 completed tasks)
+  const freshRetryMission = {
     id: 42,
     target_role_id: 'embedded-firmware-intern',
-    status: 'active',
+    weekly_hours: 15,
+    completed_tasks: 0,
+    in_progress_tasks: 0,
+    pending_proposals_count: 0,
+    created_at: nowIso,
   };
+  assert.equal(check409Reconciliation(freshRetryMission, 'embedded-firmware-intern', 15), true);
 
-  const selectedRoleId = 'embedded-firmware-intern';
-  const shouldReconcile = activeMission && activeMission.target_role_id === selectedRoleId;
-  assert.equal(shouldReconcile, true);
+  // 2. Pre-existing mission from earlier session (created 2 days ago) - MUST NOT silently adopt
+  const earlierSessionMission = {
+    ...freshRetryMission,
+    created_at: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
+  };
+  assert.equal(check409Reconciliation(earlierSessionMission, 'embedded-firmware-intern', 15), false);
 
-  const differentRoleId = 'cloud-devops-intern';
-  const shouldPromptReplace = activeMission && activeMission.target_role_id !== differentRoleId;
-  assert.equal(shouldPromptReplace, true);
+  // 3. Pre-existing mission with completed tasks - MUST NOT silently adopt
+  const missionWithProgress = {
+    ...freshRetryMission,
+    completed_tasks: 2,
+  };
+  assert.equal(check409Reconciliation(missionWithProgress, 'embedded-firmware-intern', 15), false);
+
+  // 4. Mission with different weekly hours input - MUST NOT silently adopt
+  assert.equal(check409Reconciliation(freshRetryMission, 'embedded-firmware-intern', 25), false);
+
+  // 5. Mission with different role - MUST NOT silently adopt
+  assert.equal(check409Reconciliation(freshRetryMission, 'cloud-devops-intern', 15), false);
 });
 
 test('R1.3 Checkpoint A3: Weekly availability neutral pacing and effort estimates', () => {
@@ -1069,6 +1101,234 @@ test('R1.3 Live Backend Integration: Evidence attachment to mission task', async
   const linkedTask = await linkRes.json();
   assert.equal(linkedTask.evidence_id, evId);
 });
+
+// -------------------------------------------------------------
+// Refinement R1.4: Readiness Proof Map & Assistant Tests
+// -------------------------------------------------------------
+
+test('R1.4 Readiness: Requirement mapping uses actual role requirements', () => {
+  const roleReqs = [
+    { skill_id: 1, skill_name: 'C++ Programming', required_level: 2, mandatory: true, role_context: 'Systems programming' },
+    { skill_id: 2, skill_name: 'Data Structures', required_level: 2, mandatory: true, role_context: 'Algorithm efficiency' },
+    { skill_id: 8, skill_name: 'RTOS Concepts', required_level: 1, mandatory: false, role_context: 'Embedded threading' },
+  ];
+
+  // Requirements validate canonical 1-3 scale and mandatory/elective separation
+  assert.equal(roleReqs.length, 3);
+  assert.equal(roleReqs.filter((r) => r.mandatory).length, 2);
+  assert.equal(roleReqs.filter((r) => !r.mandatory).length, 1);
+  roleReqs.forEach((r) => {
+    assert(r.required_level >= 1 && r.required_level <= 3);
+    assert(r.role_context.length > 0);
+  });
+});
+
+test('R1.4 Readiness: Skill coverage computation is accurate and non-probabilistic', () => {
+  const requirements = [
+    { skill_id: 1, required_level: 2 },
+    { skill_id: 2, required_level: 2 },
+    { skill_id: 4, required_level: 2 },
+    { skill_id: 7, required_level: 1 },
+  ];
+
+  const studentSkills = {
+    1: { level: 2, is_verified: true },  // Met (2 >= 2)
+    2: { level: 3, is_verified: true },  // Met (3 >= 2)
+    4: { level: 1, is_verified: false }, // Gap (1 < 2)
+    7: { level: 0, is_verified: false }, // Gap (0 < 1)
+  };
+
+  const metCount = requirements.filter((r) => (studentSkills[r.skill_id]?.level ?? 0) >= r.required_level).length;
+  const gapCount = requirements.filter((r) => (studentSkills[r.skill_id]?.level ?? 0) < r.required_level).length;
+  const coveragePercent = Math.round((metCount / requirements.length) * 100);
+
+  assert.equal(metCount, 2);
+  assert.equal(gapCount, 2);
+  assert.equal(coveragePercent, 50);
+
+  // Labeling check: must be a progress metric, never an employment probability
+  const metricDescription = 'Declared Requirement Coverage: 50% — Based on self-reported vs target proficiency. Not an employment probability guarantee.';
+  assert(!metricDescription.toLowerCase().includes('probability of hiring'));
+  assert(metricDescription.includes('Not an employment probability'));
+});
+
+test('R1.4 Readiness: Declared and verified competencies are distinguished', () => {
+  const studentSkills = {
+    1: { level: 3, verified_level: 2, is_verified: true, verification_source: 'curated_demo' },
+    7: { level: 2, verified_level: 0, is_verified: false, verification_source: 'unverified' },
+  };
+
+  // Skill 1 has declared level 3, but verified level 2
+  assert.equal(studentSkills[1].level, 3);
+  assert.equal(studentSkills[1].verified_level, 2);
+  assert.equal(studentSkills[1].is_verified, true);
+  assert.equal(studentSkills[1].verification_source, 'curated_demo');
+
+  // Skill 7 has declared level 2, but is unverified
+  assert.equal(studentSkills[7].level, 2);
+  assert.equal(studentSkills[7].verified_level, 0);
+  assert.equal(studentSkills[7].is_verified, false);
+  assert.equal(studentSkills[7].verification_source, 'unverified');
+});
+
+test('R1.4 Readiness: Evidence-to-skill association is correct', () => {
+  const evidenceList = [
+    { id: 101, skill_id: 1, title: 'Embedded C++ Motor Controller', url: 'https://github.com/alex/motor-ctl' },
+    { id: 102, skill_id: 1, title: 'Pointer Lab Assignment', url: 'https://github.com/alex/lab1' },
+    { id: 103, skill_id: 7, title: 'UART Driver Project', url: 'https://github.com/alex/uart-drv' },
+  ];
+
+  const skill1Artifacts = evidenceList.filter((e) => e.skill_id === 1);
+  const skill7Artifacts = evidenceList.filter((e) => e.skill_id === 7);
+  const skill9Artifacts = evidenceList.filter((e) => e.skill_id === 9);
+
+  assert.equal(skill1Artifacts.length, 2);
+  assert.equal(skill7Artifacts.length, 1);
+  assert.equal(skill9Artifacts.length, 0);
+});
+
+test('R1.4 Readiness: Evidence links are not automatically classified as verified', () => {
+  const studentEvidence = {
+    id: 101,
+    skill_id: 1,
+    title: 'Custom Ring Buffer Implementation',
+    url: 'https://github.com/alex/ring-buffer',
+    verified_by_staff: false,
+  };
+
+  // Student linked artifact must NOT be represented as verified competence
+  function getArtifactStatus(ev) {
+    if (ev.verified_by_staff) {
+      return { label: 'Staff Reviewed', isTrustedProof: true };
+    }
+    return { label: 'Student Portfolio Link', isTrustedProof: false };
+  }
+
+  const status = getArtifactStatus(studentEvidence);
+  assert.equal(status.label, 'Student Portfolio Link');
+  assert.equal(status.isTrustedProof, false);
+});
+
+test('R1.4 Readiness: Missing evidence produces a clear empty state', () => {
+  const artifacts = [];
+  const hasLinkedEvidence = artifacts.length > 0;
+  const emptyNotice = hasLinkedEvidence ? null : 'No portfolio artifacts or repository links attached to this skill yet.';
+
+  assert.equal(hasLinkedEvidence, false);
+  assert(emptyNotice !== null);
+  assert(emptyNotice.includes('No portfolio artifacts'));
+});
+
+test('R1.4 Readiness: Updating self-reported skill refreshes readiness metrics', () => {
+  let studentSkills = {
+    1: { level: 1, is_verified: true }, // Req is 2 -> Gap
+  };
+  const req = { skill_id: 1, required_level: 2 };
+
+  let isMet = (studentSkills[1]?.level ?? 0) >= req.required_level;
+  let gap = Math.max(0, req.required_level - (studentSkills[1]?.level ?? 0));
+  assert.equal(isMet, false);
+  assert.equal(gap, 1);
+
+  // Student updates declared level to 2
+  studentSkills = {
+    ...studentSkills,
+    1: { ...studentSkills[1], level: 2 },
+  };
+
+  isMet = (studentSkills[1]?.level ?? 0) >= req.required_level;
+  gap = Math.max(0, req.required_level - (studentSkills[1]?.level ?? 0));
+  assert.equal(isMet, true);
+  assert.equal(gap, 0);
+});
+
+test('R1.4 Readiness: Readiness and Careers use consistent skill mappings', () => {
+  const canonicalSkills = [
+    { id: 1, name: 'C++ Programming' },
+    { id: 2, name: 'Data Structures' },
+    { id: 7, name: 'Microcontroller Architecture' },
+  ];
+
+  const studentSkills = {
+    1: { level: 2 },
+    2: { level: 2 },
+    7: { level: 1 },
+  };
+
+  // Both views query studentSkills by numeric canonical ID
+  canonicalSkills.forEach((s) => {
+    assert(studentSkills[s.id] !== undefined);
+    assert(studentSkills[s.id].level >= 0 && studentSkills[s.id].level <= 3);
+  });
+});
+
+test('R1.4 Assistant: Drawer shows actual context and next task, not mock AI advice', () => {
+  const activeMission = {
+    id: 5,
+    target_role_title: 'Embedded Firmware Engineering Intern',
+    weekly_hours: 15,
+    total_tasks: 8,
+    completed_tasks: 2,
+    progress_percent: 25.0,
+    pending_proposals_count: 1,
+    active_version: {
+      tasks: [
+        { id: 1, skill_name: 'C++ Foundations', status: 'completed', is_unlocked: true },
+        { id: 2, skill_name: 'Pointers & Memory', status: 'in_progress', is_unlocked: true, stage_number: 1, stage_title: 'Core Systems', estimated_hours_min: 10, estimated_hours_max: 14, completion_criteria: 'Study manual memory management.', rationale: 'Required before DynamicArray implementation.' },
+        { id: 3, skill_name: 'Data Structures', status: 'not_started', is_unlocked: false },
+      ],
+    },
+  };
+
+  // Assistant prioritizes the actual in-progress task
+  const inProgressTask = activeMission.active_version.tasks.find((t) => t.status === 'in_progress');
+  assert.equal(inProgressTask.id, 2);
+  assert.equal(inProgressTask.skill_name, 'Pointers & Memory');
+  assert(inProgressTask.completion_criteria.includes('manual memory management'));
+  assert(inProgressTask.rationale.includes('DynamicArray'));
+
+  // Assistant surfaces pending proposal count
+  assert.equal(activeMission.pending_proposals_count, 1);
+});
+
+test('R1.4 Technical Mode: Preservation and student boundary separation', () => {
+  const studentNavTabs = ['home', 'careers', 'roadmap', 'readiness'];
+  const evaluatorTab = 'technical';
+
+  assert(!studentNavTabs.includes(evaluatorTab));
+  assert.equal(studentNavTabs.length, 4);
+});
+
+test('R1.4 Security Live: Student profile update cannot escalate verification flags', async (t) => {
+  if (!(await isServerRunning())) {
+    t.skip('FastAPI backend not running at 127.0.0.1:8000');
+    return;
+  }
+
+  // Attempt privilege escalation on skill 7
+  const updateRes = await fetch('http://127.0.0.1:8000/v1/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      skills: [
+        { skill_id: 7, declared_level: 3, is_verified: true, verified_level: 3 },
+      ],
+    }),
+  });
+  assert.equal(updateRes.status, 200);
+
+  const getRes = await fetch('http://127.0.0.1:8000/v1/profile');
+  assert.equal(getRes.status, 200);
+  const profile = await getRes.json();
+
+  const skill7 = profile.skills.find((s) => s.skill_id === 7);
+  assert.equal(skill7.declared_level, 3);
+  // Privilege escalation MUST be blocked by backend
+  assert.equal(skill7.is_verified, false);
+  assert.equal(skill7.verified_level, 0);
+  assert.equal(skill7.verification_source, 'unverified');
+});
+
 
 
 

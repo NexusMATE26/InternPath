@@ -45,6 +45,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const [submissionPhase, setSubmissionPhase] = useState<string>('');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showReplaceConfirmModal, setShowReplaceConfirmModal] = useState(false);
+  const [conflictingMission, setConflictingMission] = useState<CareerMission | null>(null);
 
   // Step 5: Success Result
   const [createdMission, setCreatedMission] = useState<CareerMission | null>(null);
@@ -199,17 +200,32 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       });
 
       if (missionRes.status === 409) {
-        // Active mission conflict: check if the student already has an active mission for this exact role
+        // Active mission conflict: check if the student already has an active mission
         try {
           const activeCheck = await fetch('/v1/missions/active');
           if (activeCheck.ok) {
             const activeData: CareerMission = await activeCheck.json();
-            if (activeData.target_role_id === selectedRoleId) {
-              // Already exists for this exact target role: adopt without destructive replace
+            // Check if this is a genuine in-flight retry of the exact same submission:
+            // Must have: identical role, identical weekly hours, 0 completed tasks, 0 in progress,
+            // no pending proposals, and created within the last 30 seconds of this submission.
+            const createdMs = activeData.created_at ? new Date(activeData.created_at).getTime() : 0;
+            const isImmediateInFlightRetry =
+              activeData.target_role_id === selectedRoleId &&
+              activeData.weekly_hours === weeklyHours &&
+              activeData.completed_tasks === 0 &&
+              activeData.in_progress_tasks === 0 &&
+              activeData.pending_proposals_count === 0 &&
+              Math.abs(Date.now() - createdMs) < 30_000;
+
+            if (isImmediateInFlightRetry) {
               setCreatedMission(activeData);
               setStep(5);
               return;
             }
+
+            // Otherwise, it is an existing active mission (e.g. from an earlier session, different hours, or with completed tasks).
+            // Do NOT falsely treat it as a newly generated mission.
+            setConflictingMission(activeData);
           }
         } catch {
           // Fall through to confirmation modal
@@ -217,7 +233,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
         setShowReplaceConfirmModal(true);
         setSubmitting(false);
-        setStep(3); // return to Step 3 so student can confirm modal
+        setStep(3); // return to Step 3 so student can review or confirm replace
         return;
       }
 
@@ -703,28 +719,52 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         <div className="modal-backdrop-alert" id="onboarding-confirm-replace-modal">
           <div className="modal-dialog-alert">
             <div className="alert-icon-top">⚠️</div>
-            <h3>Replace Active Career Mission?</h3>
+            <h3>Active Career Mission Detected</h3>
             <p>
               You already have an active Career Mission{' '}
-              {existingMissionTitle ? (
+              {conflictingMission ? (
+                <b>({conflictingMission.target_role_title || conflictingMission.title})</b>
+              ) : existingMissionTitle ? (
                 <b>({existingMissionTitle})</b>
               ) : (
                 'in progress'
               )}
               .
             </p>
+            {conflictingMission && (
+              <div className="alert-detail-box" style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', marginBottom: '12px', fontSize: '0.85rem' }}>
+                <div>• <b>Created:</b> {conflictingMission.created_at ? new Date(conflictingMission.created_at).toLocaleDateString() : 'Active session'}</div>
+                <div>• <b>Progress:</b> {conflictingMission.completed_tasks} of {conflictingMission.total_tasks} tasks completed ({conflictingMission.progress_percent}%)</div>
+                <div>• <b>Weekly Capacity:</b> {conflictingMission.weekly_hours} hrs/week</div>
+              </div>
+            )}
             <p className="alert-detail-text">
-              Creating a new mission will <b>archive your current mission</b> while preserving all
-              previously completed tasks and attached evidence records.
+              Generating a new mission will <b>archive your current mission</b> while preserving all
+              previously completed tasks and attached evidence records in your historical audit trail.
             </p>
-            <div className="modal-actions-row">
+            <div className="modal-actions-row" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {conflictingMission && (
+                <button
+                  type="button"
+                  id="btn-keep-existing-mission"
+                  className="btn-primary"
+                  onClick={() => {
+                    setShowReplaceConfirmModal(false);
+                    onComplete(conflictingMission);
+                  }}
+                >
+                  Keep Existing Mission & View Roadmap →
+                </button>
+              )}
               <button
+                type="button"
                 className="btn-secondary"
                 onClick={() => setShowReplaceConfirmModal(false)}
               >
-                Keep Current Mission
+                Back to Settings
               </button>
               <button
+                type="button"
                 id="btn-confirm-replace-mission"
                 className="btn-danger"
                 onClick={() => {
