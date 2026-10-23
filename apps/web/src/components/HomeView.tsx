@@ -6,6 +6,7 @@ interface HomeViewProps {
   onNavigateToCareers: () => void;
   onNavigateToReadiness: () => void;
   onNavigateToTechnical: () => void;
+  onStartOnboarding?: () => void;
 }
 
 interface StudentProfile {
@@ -20,6 +21,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateToCareers,
   onNavigateToReadiness,
   onNavigateToTechnical,
+  onStartOnboarding,
 }) => {
   const [mission, setMission] = useState<CareerMission | null>(null);
   const [profile, setProfile] = useState<StudentProfile | null>(null);
@@ -381,7 +383,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <button
               id="btn-home-choose-goal"
               className="btn-primary btn-large"
-              onClick={onNavigateToCareers}
+              onClick={onStartOnboarding || onNavigateToCareers}
             >
               🎯 Choose Your Internship Goal →
             </button>

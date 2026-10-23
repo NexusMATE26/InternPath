@@ -32,6 +32,7 @@ interface CareersViewProps {
   onSelectRole: (roleId: string) => void;
   onNavigateToRoadmap: () => void;
   onNavigateToReadiness: () => void;
+  onStartOnboarding?: (roleId: string) => void;
 }
 
 export const CareersView: React.FC<CareersViewProps> = ({
@@ -40,6 +41,7 @@ export const CareersView: React.FC<CareersViewProps> = ({
   onSelectRole,
   onNavigateToRoadmap,
   onNavigateToReadiness,
+  onStartOnboarding,
 }) => {
   const [roleDetail, setRoleDetail] = useState<RoleDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -150,9 +152,18 @@ export const CareersView: React.FC<CareersViewProps> = ({
                   <small>{roleDetail.department} • {roleDetail.location}</small>
                 </div>
                 <div className="action-buttons-group">
+                  {onStartOnboarding && (
+                    <button
+                      id="btn-careers-start-onboarding"
+                      className="btn-primary"
+                      onClick={() => onStartOnboarding(roleDetail.role_id)}
+                    >
+                      🚀 Start Roadmap for This Goal →
+                    </button>
+                  )}
                   <button
                     id="btn-careers-plan-roadmap"
-                    className="btn-primary"
+                    className="btn-secondary"
                     onClick={onNavigateToRoadmap}
                   >
                     View / Plan Roadmap →

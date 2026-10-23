@@ -4418,3 +4418,820 @@ footer {
   color: #6b21a8;
   font-size: 11px;
 }
+
+/* ==========================================================================
+   REFINEMENT R1.2: GUIDED STUDENT ONBOARDING FLOW STYLES
+   ========================================================================== */
+
+/* Universal Button Utilities */
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+  border: 1px solid #1d4ed8;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #1d4ed8;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #f8fafc;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.btn-danger {
+  background: #ef4444;
+  color: #fff;
+  border: 1px solid #dc2626;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+}
+
+/* Onboarding Overlay & Container */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow-y: auto;
+}
+
+.onboarding-modal-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  max-width: 860px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+/* Stepper Header */
+.onboarding-stepper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.onboarding-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: Manrope, sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.onboarding-mark {
+  background: #2563eb;
+  color: white;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.onboarding-close-btn {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.onboarding-close-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* Stepper Dots */
+.stepper-dots-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-dot-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.step-dot-item.active {
+  color: #2563eb;
+}
+
+.step-dot-item.completed {
+  color: #10b981;
+}
+
+.dot-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #64748b;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.step-dot-item.active .dot-num {
+  background: #2563eb;
+  color: #fff;
+}
+
+.step-dot-item.completed .dot-num {
+  background: #10b981;
+  color: #fff;
+}
+
+.stepper-connector {
+  width: 24px;
+  height: 2px;
+  background: #e2e8f0;
+}
+
+/* Step Body */
+.onboarding-step-body {
+  padding: 28px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.step-intro-box h2 {
+  font-size: 24px;
+  color: #0f172a;
+  margin: 6px 0 8px;
+}
+
+.step-subtext {
+  font-size: 14px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0 0 18px;
+}
+
+.onboarding-demo-notice {
+  font-size: 12px;
+  color: #475569;
+  background: #eff6ff;
+  border-left: 3px solid #3b82f6;
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+/* Roles Grid */
+.onboarding-roles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.onboarding-role-card {
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 20px;
+  cursor: pointer;
+  background: #fff;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.onboarding-role-card:hover {
+  border-color: #93c5fd;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
+}
+
+.onboarding-role-card.selected {
+  border-color: #2563eb;
+  background: #f0f7ff;
+  box-shadow: 0 0 0 1px #2563eb;
+}
+
+.role-card-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.role-card-top-row .role-title {
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.role-demo-pill {
+  font-size: 10px;
+  font-weight: 800;
+  color: #3b82f6;
+  background: #dbeafe;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.role-card-desc {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.45;
+  margin: 10px 0 16px;
+  flex: 1;
+}
+
+.role-card-bottom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+}
+
+.req-count {
+  color: #64748b;
+}
+
+.select-check {
+  font-weight: 700;
+  color: #2563eb;
+}
+
+/* Footer Actions */
+.onboarding-footer-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 20px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.success-footer {
+  justify-content: center;
+}
+
+/* Level Legend Card */
+.level-legend-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+}
+
+.legend-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.legend-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.legend-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.legend-pill {
+  font-weight: 700;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  width: fit-content;
+}
+
+.legend-pill.level-0 {
+  background: #f1f5f9;
+  color: #475569;
+}
+.legend-pill.level-1 {
+  background: #eff6ff;
+  color: #2563eb;
+}
+.legend-pill.level-2 {
+  background: #ecfdf5;
+  color: #059669;
+}
+.legend-pill.level-3 {
+  background: #fdf4ff;
+  color: #9333ea;
+}
+
+/* Skills Assessment List */
+.skills-assessment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.skill-assessment-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  background: #fff;
+}
+
+.skill-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.skill-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.skill-title-group strong {
+  font-size: 15px;
+  color: #0f172a;
+}
+
+.skill-req-target {
+  font-size: 11px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.skill-context-hint {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 14px;
+}
+
+.competency-selector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.selector-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.selector-buttons-group {
+  display: flex;
+  gap: 6px;
+}
+
+.rating-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-width: 60px;
+}
+
+.rating-btn:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.rating-btn.active {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+
+.btn-lvl-num {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.btn-lvl-name {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.rating-btn.active .btn-lvl-name {
+  color: #dbeafe;
+}
+
+/* Hours Presets Grid */
+.hours-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.hours-preset-card {
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  background: #fff;
+  transition: all 0.2s ease;
+}
+
+.hours-preset-card:hover {
+  border-color: #93c5fd;
+}
+
+.hours-preset-card.selected {
+  border-color: #2563eb;
+  background: #f0f7ff;
+}
+
+.preset-top {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.preset-hrs {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.preset-unit {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.preset-check {
+  margin-left: auto;
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.hours-preset-card strong {
+  display: block;
+  font-size: 13px;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.hours-preset-card p {
+  font-size: 11px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Custom Hours Box */
+.custom-hours-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+}
+
+.custom-hours-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.hours-input-field {
+  width: 100px;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.input-suffix {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.hours-error-text {
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+/* Deadline Card */
+.deadline-status-card {
+  background: #f8fafc;
+  border-left: 4px solid #64748b;
+  padding: 14px 18px;
+  border-radius: 6px;
+  margin-bottom: 24px;
+}
+
+.deadline-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.deadline-status-card p {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Processing Stage */
+.onboarding-step-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 380px;
+}
+
+.engine-processing-box {
+  text-align: center;
+  max-width: 480px;
+}
+
+.spinner-large {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #e2e8f0;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 20px;
+}
+
+.processing-phase-text {
+  font-size: 14px;
+  color: #2563eb;
+  font-weight: 600;
+  margin-bottom: 24px;
+}
+
+.engine-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.chk-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #334155;
+}
+
+.chk-icon {
+  font-size: 14px;
+}
+
+.onboarding-error-banner {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  padding: 14px;
+  border-radius: 8px;
+  margin-top: 20px;
+  font-size: 13px;
+}
+
+/* Success Screen */
+.success-hero-box {
+  text-align: center;
+  padding: 20px 0 24px;
+}
+
+.success-check-badge {
+  width: 56px;
+  height: 56px;
+  background: #10b981;
+  color: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 800;
+  margin: 0 auto 14px;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+}
+
+.success-hero-box h2 {
+  font-size: 26px;
+  color: #0f172a;
+  margin: 6px 0;
+}
+
+.success-subtext {
+  font-size: 14px;
+  color: #64748b;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.mission-stats-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 20px 0;
+}
+
+.mission-summary-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+
+.mission-summary-card .stat-val {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 4px 0;
+}
+
+.mission-summary-card .stat-desc {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.first-task-preview-card {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 18px;
+  margin-bottom: 24px;
+}
+
+.first-task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.badge-first-action {
+  font-size: 11px;
+  font-weight: 800;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.first-task-preview-card h4 {
+  font-size: 16px;
+  color: #0f172a;
+  margin: 0 0 8px;
+}
+
+.criteria-text {
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
+.task-effort-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #15803d;
+}
+
+/* Replace Alert Modal */
+.modal-backdrop-alert {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 16px;
+}
+
+.modal-dialog-alert {
+  background: #fff;
+  border-radius: 14px;
+  max-width: 480px;
+  width: 100%;
+  padding: 28px;
+  text-align: center;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+}
+
+.alert-icon-top {
+  font-size: 36px;
+  margin-bottom: 12px;
+}
+
+.modal-dialog-alert h3 {
+  font-size: 20px;
+  color: #0f172a;
+  margin: 0 0 10px;
+}
+
+.alert-detail-text {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 12px 0 24px;
+}
+
+.modal-actions-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+

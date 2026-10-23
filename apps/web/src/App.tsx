@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
-import CareerMissionView, { EvidenceItem } from './components/CareerMissionView';
+import { useState, useEffect, useCallback } from 'react';
+import CareerMissionView, { CareerMission, EvidenceItem } from './components/CareerMissionView';
 import { HomeView } from './components/HomeView';
 import { CareersView, RoleItem } from './components/CareersView';
 import { ReadinessView, Skill, StudentSkillState } from './components/ReadinessView';
 import { TechnicalModeView } from './components/TechnicalModeView';
 import { AssistantDrawer } from './components/AssistantDrawer';
+import { OnboardingFlow } from './components/OnboardingFlow';
 
 interface StudentProfile {
   id: number;
@@ -31,6 +32,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [assistantOpen, setAssistantOpen] = useState(false);
 
+  // Guided Onboarding State (R1.2)
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingInitialRole, setOnboardingInitialRole] = useState<string | null>(null);
+  const [activeMission, setActiveMission] = useState<CareerMission | null>(null);
+
   // Core Data State (persisted via FastAPI & database)
   const [skills, setSkills] = useState<Skill[]>([]);
   const [roles, setRoles] = useState<RoleItem[]>([]);
@@ -50,15 +56,22 @@ export default function App() {
   const [planLoading, setPlanLoading] = useState(false);
   const [, setPlanError] = useState('');
 
-  // Load initial skills, roles, and persisted student profile
-  useEffect(() => {
-    async function loadInitialData() {
-      try {
-        const [skillsRes, rolesRes, profileRes] = await Promise.all([
-          fetch('/v1/skills'),
-          fetch('/v1/roles'),
-          fetch('/v1/profile'),
-        ]);
+  // Load initial skills, roles, active mission, and persisted student profile
+  const loadInitialData = useCallback(async () => {
+    try {
+      const [skillsRes, rolesRes, profileRes, missionRes] = await Promise.all([
+        fetch('/v1/skills'),
+        fetch('/v1/roles'),
+        fetch('/v1/profile'),
+        fetch('/v1/missions/active'),
+      ]);
+
+      if (missionRes.ok) {
+        const missionData: CareerMission = await missionRes.json();
+        setActiveMission(missionData);
+      } else {
+        setActiveMission(null);
+      }
 
         if (skillsRes.ok && rolesRes.ok) {
           const loadedSkills: Skill[] = await skillsRes.json();
@@ -98,9 +111,30 @@ export default function App() {
       } catch (err) {
         console.error('Failed to load initial data:', err);
       }
-    }
+    },
+    []
+  );
+
+  useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [loadInitialData]);
+
+  // Launch guided onboarding (R1.2)
+  function handleStartOnboarding(roleId?: string) {
+    setOnboardingInitialRole(roleId || selectedRoleId || null);
+    setOnboardingOpen(true);
+  }
+
+  // Handle successful onboarding completion
+  function handleOnboardingComplete(newMission: CareerMission) {
+    setActiveMission(newMission);
+    if (newMission.target_role_id) {
+      setSelectedRoleId(newMission.target_role_id);
+    }
+    setOnboardingOpen(false);
+    setActiveTab('roadmap');
+    loadInitialData();
+  }
 
   // Update a single skill's declared or verified state
   function handleSkillChange(skillId: number, level: number, isVerified: boolean) {
@@ -299,6 +333,7 @@ export default function App() {
               onNavigateToCareers={() => setActiveTab('careers')}
               onNavigateToReadiness={() => setActiveTab('readiness')}
               onNavigateToTechnical={() => setActiveTab('technical')}
+              onStartOnboarding={handleStartOnboarding}
             />
           )}
 
@@ -310,6 +345,7 @@ export default function App() {
               onSelectRole={(id) => setSelectedRoleId(id)}
               onNavigateToRoadmap={() => setActiveTab('roadmap')}
               onNavigateToReadiness={() => setActiveTab('readiness')}
+              onStartOnboarding={handleStartOnboarding}
             />
           )}
 
@@ -319,6 +355,7 @@ export default function App() {
               onNavigateToPlanner={() => setActiveTab('careers')}
               availableRoles={roles}
               evidenceList={evidenceList}
+              onStartOnboarding={handleStartOnboarding}
             />
           )}
 
@@ -364,6 +401,17 @@ export default function App() {
         activeRoleTitle={selectedRole?.title}
         weeklyHours={weeklyHours}
       />
+
+      {/* Guided Student Onboarding Flow (R1.2) */}
+      {onboardingOpen && (
+        <OnboardingFlow
+          initialRoleId={onboardingInitialRole}
+          hasExistingActiveMission={Boolean(activeMission)}
+          existingMissionTitle={activeMission?.title}
+          onComplete={handleOnboardingComplete}
+          onCancel={() => setOnboardingOpen(false)}
+        />
+      )}
     </div>
   );
 }

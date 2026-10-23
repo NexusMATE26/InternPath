@@ -126,12 +126,14 @@ interface CareerMissionViewProps {
   availableRoles: Array<{ role_id: string; title: string }>;
   evidenceList: EvidenceItem[];
   onEvidenceCreated?: () => void;
+  onStartOnboarding?: () => void;
 }
 
 export default function CareerMissionView({
   onNavigateToPlanner,
   availableRoles,
   evidenceList,
+  onStartOnboarding,
 }: CareerMissionViewProps) {
   const [mission, setMission] = useState<CareerMission | null>(null);
   const [loading, setLoading] = useState(true);
@@ -465,15 +467,25 @@ export default function CareerMissionView({
           Mission with verifiable milestones, audit logging, and human-approved replanning.
         </p>
         <div className="empty-actions">
-          <button
-            id="btn-init-mission"
-            className="btn-primary"
-            onClick={handleCreateInitialMission}
-          >
-            🎯 Create Career Mission for {availableRoles[0]?.title || 'Target Role'}
-          </button>
+          {onStartOnboarding ? (
+            <button
+              id="btn-init-mission"
+              className="btn-primary btn-large"
+              onClick={onStartOnboarding}
+            >
+              🚀 Launch Guided Onboarding →
+            </button>
+          ) : (
+            <button
+              id="btn-init-mission"
+              className="btn-primary"
+              onClick={handleCreateInitialMission}
+            >
+              🎯 Create Career Mission for {availableRoles[0]?.title || 'Target Role'}
+            </button>
+          )}
           <button className="btn-secondary" onClick={onNavigateToPlanner}>
-            🛤 Configure Skills in Planner First
+            🎯 Browse Careers Catalogue
           </button>
         </div>
       </div>

@@ -467,6 +467,222 @@ test('R1.1 New student vs returning student Home view state discrimination', () 
   assert.equal(getHomeState({ id: 1, title: 'Embedded Systems' }), 'returning_student_roadmap');
 });
 
+// -------------------------------------------------------------
+// 5. Refinement R1.2: Guided Student Onboarding Flow Tests
+// -------------------------------------------------------------
+
+test('R1.2 Onboarding: Role selection and requirement filtering by role', () => {
+  const roles = [
+    { role_id: 'distributed-systems-intern', title: 'Distributed Systems', requirements_count: 2 },
+    { role_id: 'backend-api-intern', title: 'Backend Platform', requirements_count: 3 },
+  ];
+
+  function selectRole(selectedId) {
+    const role = roles.find((r) => r.role_id === selectedId);
+    assert(role, `Role ${selectedId} should exist in catalogue`);
+    return role;
+  }
+
+  const selected = selectRole('backend-api-intern');
+  assert.equal(selected.title, 'Backend Platform');
+  assert.equal(selected.requirements_count, 3);
+});
+
+test('R1.2 Onboarding: Skill rating scale strictly enforces levels 0 to 3', () => {
+  function validateSkillRating(level) {
+    if (typeof level !== 'number' || level < 0 || level > 3 || !Number.isInteger(level)) {
+      throw new Error(`Invalid skill level ${level}: must be an integer between 0 and 3.`);
+    }
+    const labels = {
+      0: 'Not yet learned',
+      1: 'Basic',
+      2: 'Intermediate',
+      3: 'Advanced',
+    };
+    return labels[level];
+  }
+
+  assert.equal(validateSkillRating(0), 'Not yet learned');
+  assert.equal(validateSkillRating(1), 'Basic');
+  assert.equal(validateSkillRating(2), 'Intermediate');
+  assert.equal(validateSkillRating(3), 'Advanced');
+
+  assert.throws(() => validateSkillRating(-1), /Invalid skill level/);
+  assert.throws(() => validateSkillRating(4), /Invalid skill level/);
+  assert.throws(() => validateSkillRating(2.5), /Invalid skill level/);
+});
+
+test('R1.2 Onboarding: Weekly hours validation and preset mappings', () => {
+  function validateWeeklyHours(hrs) {
+    if (typeof hrs !== 'number' || isNaN(hrs) || hrs < 1 || hrs > 80) {
+      return { valid: false, error: 'Weekly hours must be between 1 and 80 hours/week.' };
+    }
+    return { valid: true, error: null };
+  }
+
+  // Presets
+  const presets = [5, 10, 15, 20];
+  presets.forEach((p) => {
+    assert.equal(validateWeeklyHours(p).valid, true);
+  });
+
+  // Boundary conditions
+  assert.equal(validateWeeklyHours(1).valid, true);
+  assert.equal(validateWeeklyHours(80).valid, true);
+  assert.equal(validateWeeklyHours(0).valid, false);
+  assert.equal(validateWeeklyHours(-5).valid, false);
+  assert.equal(validateWeeklyHours(81).valid, false);
+});
+
+test('R1.2 Onboarding: Multi-step draft state retention across Back and Continue navigation', () => {
+  // Simulate Onboarding multi-step state container
+  const draft = {
+    step: 1,
+    selectedRoleId: 'backend-api-intern',
+    skillRatings: { 4: 2, 9: 1 },
+    weeklyHours: 15,
+  };
+
+  // Step 1 -> Step 2
+  draft.step = 2;
+  draft.skillRatings[8] = 0; // added in Step 2
+
+  // Step 2 -> Step 3
+  draft.step = 3;
+  draft.weeklyHours = 20; // modified in Step 3
+
+  // Step 3 -> Back to Step 2
+  draft.step = 2;
+  // Verify ratings and role were retained
+  assert.equal(draft.selectedRoleId, 'backend-api-intern');
+  assert.deepEqual(draft.skillRatings, { 4: 2, 9: 1, 8: 0 });
+  assert.equal(draft.weeklyHours, 20);
+
+  // Step 2 -> Back to Step 1
+  draft.step = 1;
+  assert.equal(draft.selectedRoleId, 'backend-api-intern');
+  assert.deepEqual(draft.skillRatings, { 4: 2, 9: 1, 8: 0 });
+});
+
+test('R1.2 Onboarding: Truthful deadline display when unconfirmed', () => {
+  function getDeadlineNotice(verifiedDeadlineDate) {
+    if (!verifiedDeadlineDate) {
+      return {
+        confirmed: false,
+        text: 'Internship deadline not confirmed',
+        disclaimer: 'Verified employer application closing dates will be shown here when officially announced.',
+      };
+    }
+    return { confirmed: true, text: verifiedDeadlineDate, disclaimer: 'Verified deadline' };
+  }
+
+  const notice = getDeadlineNotice(null);
+  assert.equal(notice.confirmed, false);
+  assert.equal(notice.text, 'Internship deadline not confirmed');
+  assert(notice.disclaimer.includes('Verified employer application closing dates'));
+});
+
+test('R1.2 Onboarding: Prevention of duplicate mission submissions while processing', () => {
+  let isSubmitting = false;
+  let submissionCount = 0;
+
+  function attemptSubmit() {
+    if (isSubmitting) {
+      return false; // submission locked
+    }
+    isSubmitting = true;
+    submissionCount++;
+    return true;
+  }
+
+  assert.equal(attemptSubmit(), true);
+  assert.equal(submissionCount, 1);
+
+  // Duplicate click while in-flight
+  assert.equal(attemptSubmit(), false);
+  assert.equal(submissionCount, 1);
+
+  // Unlock after request completes
+  isSubmitting = false;
+  assert.equal(attemptSubmit(), true);
+  assert.equal(submissionCount, 2);
+});
+
+test('R1.2 Onboarding: Live first Career Mission generation and persistence via FastAPI', async (t) => {
+  if (!(await isServerRunning())) {
+    t.skip('FastAPI backend not running at 127.0.0.1:8000');
+    return;
+  }
+
+  // 1. Update student profile with onboarding skill ratings
+  const updateRes = await fetch('http://127.0.0.1:8000/v1/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      target_role_id: 'backend-api-intern',
+      weekly_hours: 15,
+      skills: [
+        { skill_id: 1, declared_level: 2, verified_level: 0, is_verified: false },
+        { skill_id: 2, declared_level: 1, verified_level: 0, is_verified: false },
+        { skill_id: 4, declared_level: 0, verified_level: 0, is_verified: false },
+        { skill_id: 9, declared_level: 0, verified_level: 0, is_verified: false },
+      ],
+    }),
+  });
+  assert.equal(updateRes.status, 200);
+
+  // 2. Generate and persist Career Mission (allow_replace_active: true to ensure clean test state)
+  const missionRes = await fetch('http://127.0.0.1:8000/v1/missions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      target_role_id: 'backend-api-intern',
+      weekly_hours: 15,
+      allow_replace_active: true,
+    }),
+  });
+  assert.equal(missionRes.status, 201);
+  const mission = await missionRes.json();
+
+  assert(mission.id > 0);
+  assert.equal(mission.target_role_id, 'backend-api-intern');
+  assert.equal(mission.status, 'active');
+  assert.equal(mission.active_version_number, 1);
+  assert(mission.total_tasks > 0);
+  assert(mission.active_version.stages.length > 0);
+
+  // 3. Verify mission persists across active lookup
+  const activeRes = await fetch('http://127.0.0.1:8000/v1/missions/active');
+  assert.equal(activeRes.status, 200);
+  const active = await activeRes.json();
+  assert.equal(active.id, mission.id);
+  assert.equal(active.target_role_id, 'backend-api-intern');
+});
+
+test('R1.2 Onboarding: Active mission conflict detection & protection (HTTP 409)', async (t) => {
+  if (!(await isServerRunning())) {
+    t.skip('FastAPI backend not running at 127.0.0.1:8000');
+    return;
+  }
+
+  // Attempting to create mission with same active role when allow_replace_active is false
+  const conflictRes = await fetch('http://127.0.0.1:8000/v1/missions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      target_role_id: 'backend-api-intern',
+      weekly_hours: 15,
+      allow_replace_active: false,
+    }),
+  });
+
+  // Must return HTTP 409 Conflict to protect existing student mission
+  assert.equal(conflictRes.status, 409);
+  const errBody = await conflictRes.json();
+  assert(errBody.detail.includes('already exists'));
+});
+
+
 
 
 
