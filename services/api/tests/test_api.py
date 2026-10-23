@@ -275,6 +275,27 @@ def test_update_profile_and_persist():
     })
 
 
+def test_update_profile_preserves_verified_status():
+    # 1. Inspect existing verified status for skill 1 (verified at level 3)
+    prof1 = client.get("/v1/profile").json()
+    s1 = next(s for s in prof1["skills"] if s["skill_id"] == 1)
+    assert s1["is_verified"] is True
+    initial_ver_lvl = s1["verified_level"]
+
+    # 2. Student self-assessment attempts to downgrade or clear verification flags
+    client.put("/v1/profile", json={
+        "skills": [
+            {"skill_id": 1, "declared_level": 2, "verified_level": 0, "is_verified": False},
+        ]
+    })
+    prof2 = client.get("/v1/profile").json()
+    s2 = next(s for s in prof2["skills"] if s["skill_id"] == 1)
+    # Declared level is updated by student
+    assert s2["declared_level"] == 2
+    # Verified status and level MUST be preserved (cannot be silently downgraded or erased)
+    assert s2["is_verified"] is True
+    assert s2["verified_level"] == initial_ver_lvl
+
 
 def test_update_profile_invalid_level():
     bad_payload = {

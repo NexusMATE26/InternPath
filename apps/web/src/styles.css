@@ -5235,3 +5235,451 @@ footer {
   gap: 12px;
 }
 
+/* ==========================================================================
+   REFINEMENT R1.3: CAREERS & ROADMAP UX STYLES
+   ========================================================================== */
+
+/* Careers View Refinements */
+.role-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.role-hero-info {
+  flex: 1;
+  min-width: 280px;
+}
+
+.role-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: #3b82f6;
+  margin-bottom: 4px;
+}
+
+.role-hero-info h2 {
+  font-size: 22px;
+  color: #0f172a;
+  margin: 0 0 10px;
+}
+
+.role-meta-badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.badge-provenance {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6366f1;
+  background: #e0e7ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.role-full-desc {
+  font-size: 13px;
+  color: #475569;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.role-hero-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+}
+
+/* Skills Comparison Cards (Matched vs Gaps) */
+.skills-comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 768px) {
+  .skills-comparison-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.comparison-card {
+  border-radius: 10px;
+  padding: 18px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+}
+
+.comparison-card.matched-card {
+  border-left: 4px solid #10b981;
+}
+
+.comparison-card.gaps-card {
+  border-left: 4px solid #f59e0b;
+}
+
+.card-top-header {
+  margin-bottom: 14px;
+}
+
+.card-top-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.card-top-header small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.comparison-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skill-match-row,
+.skill-gap-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #f8fafc;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.skill-match-row strong,
+.skill-gap-row strong {
+  display: block;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.skill-level-text,
+.gap-detail-text {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.verified-chip {
+  margin-left: 6px;
+  font-size: 10px;
+  color: #047857;
+  background: #d1fae5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.status-met-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: #059669;
+  background: #ecfdf5;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.status-progress-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.comparison-empty {
+  text-align: center;
+  padding: 18px 12px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.comparison-empty-success {
+  text-align: center;
+  padding: 18px 12px;
+  color: #059669;
+  font-size: 13px;
+}
+
+.comparison-empty-success span {
+  font-size: 24px;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.btn-small {
+  padding: 6px 12px;
+  font-size: 11px;
+  margin-top: 8px;
+}
+
+/* Roadmap Proposal Alert Banner */
+.roadmap-proposal-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+  border-left: 4px solid #f59e0b;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.proposal-alert-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.alert-bell-icon {
+  font-size: 20px;
+}
+
+.proposal-alert-info strong {
+  display: block;
+  font-size: 14px;
+  color: #92400e;
+}
+
+.proposal-alert-info p {
+  margin: 0;
+  font-size: 12px;
+  color: #b45309;
+}
+
+/* Roadmap Next Step Hero Card */
+.roadmap-next-step-hero {
+  background: linear-gradient(135deg, #f0f7ff, #ffffff);
+  border: 2px solid #3b82f6;
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.08);
+}
+
+.next-step-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.badge-next-step {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: #1d4ed8;
+  background: #dbeafe;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.next-step-main-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.next-step-task-info {
+  flex: 1;
+  min-width: 280px;
+}
+
+.next-step-task-info h3 {
+  font-size: 18px;
+  color: #0f172a;
+  margin: 0 0 4px;
+}
+
+.next-step-reason-box {
+  background: #eff6ff;
+  border-left: 3px solid #2563eb;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #1e40af;
+  margin: 8px 0;
+}
+
+.next-step-criteria-excerpt {
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.4;
+  margin: 6px 0 0;
+}
+
+.next-step-actions-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Roadmap Filter Bar */
+.roadmap-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.filter-pill-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.filter-pill-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.filter-pill-btn.active {
+  background: #1e293b;
+  border-color: #0f172a;
+  color: #fff;
+}
+
+.filter-pill-count {
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.08);
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.filter-pill-btn.active .filter-pill-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* Stage Collapse Toggle Button */
+.stage-collapse-btn {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: #64748b;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.stage-collapse-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* Task Detail Modal */
+.task-detail-modal-card {
+  background: #fff;
+  border-radius: 14px;
+  width: 100%;
+  max-width: 620px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-detail-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-section-box {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.detail-section-box .detail-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.detail-section-box p {
+  margin: 0;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.prereq-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.prereq-status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding: 4px 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+}
+
+.badge-prereq-met {
+  font-size: 10px;
+  font-weight: 700;
+  color: #059669;
+  background: #d1fae5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.badge-prereq-pending {
+  font-size: 10px;
+  font-weight: 700;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+

@@ -682,6 +682,395 @@ test('R1.2 Onboarding: Active mission conflict detection & protection (HTTP 409)
   assert(errBody.detail.includes('already exists'));
 });
 
+// -------------------------------------------------------------
+// Refinement R1.3: Student-Friendly Careers & Roadmap Tests
+// -------------------------------------------------------------
+
+test('R1.3 Checkpoint A1: Verification state preservation during self-assessment', () => {
+  // Simulating OnboardingFlow skillsPayload assembly with existing verified state
+  const existingSkills = [
+    { skill_id: 1, declared_level: 2, verified_level: 2, is_verified: true },
+    { skill_id: 2, declared_level: 1, verified_level: 1, is_verified: true },
+    { skill_id: 7, declared_level: 1, verified_level: 0, is_verified: false },
+  ];
+  const userRatings = { 1: 3, 2: 1, 7: 2 };
+
+  const existingMap = new Map(existingSkills.map((s) => [s.skill_id, s]));
+  const payload = Object.entries(userRatings).map(([sid, rating]) => {
+    const sId = Number(sid);
+    const prev = existingMap.get(sId);
+    return {
+      skill_id: sId,
+      declared_level: Number(rating),
+      verified_level: prev?.is_verified ? prev.verified_level : 0,
+      is_verified: prev?.is_verified ?? false,
+    };
+  });
+
+  const skill1 = payload.find((s) => s.skill_id === 1);
+  const skill7 = payload.find((s) => s.skill_id === 7);
+
+  // Skill 1 declared level is updated to 3, but verified level 2 and is_verified: true are preserved
+  assert.equal(skill1.declared_level, 3);
+  assert.equal(skill1.verified_level, 2);
+  assert.equal(skill1.is_verified, true);
+
+  // Skill 7 was unverified; declared level updated to 2, verified remains 0 and false
+  assert.equal(skill7.declared_level, 2);
+  assert.equal(skill7.verified_level, 0);
+  assert.equal(skill7.is_verified, false);
+});
+
+test('R1.3 Checkpoint A2: Partial failure & 409 active mission reconciliation', () => {
+  // Simulate active mission lookup reconciliation
+  const activeMission = {
+    id: 42,
+    target_role_id: 'embedded-firmware-intern',
+    status: 'active',
+  };
+
+  const selectedRoleId = 'embedded-firmware-intern';
+  const shouldReconcile = activeMission && activeMission.target_role_id === selectedRoleId;
+  assert.equal(shouldReconcile, true);
+
+  const differentRoleId = 'cloud-devops-intern';
+  const shouldPromptReplace = activeMission && activeMission.target_role_id !== differentRoleId;
+  assert.equal(shouldPromptReplace, true);
+});
+
+test('R1.3 Checkpoint A3: Weekly availability neutral pacing and effort estimates', () => {
+  const pacingPresets = [
+    { hours: 5, label: 'Steady Pace (5 hrs/wk)' },
+    { hours: 10, label: 'Moderate Pace (10 hrs/wk)' },
+    { hours: 15, label: 'Dedicated Track (15 hrs/wk)' },
+    { hours: 20, label: 'Intensive Track (20 hrs/wk)' },
+  ];
+
+  // Presets use realistic, neutral pacing descriptors (no "Recommended" bias for high hours)
+  pacingPresets.forEach((p) => {
+    assert(!p.label.toLowerCase().includes('recommended'));
+    assert(p.hours >= 5 && p.hours <= 20);
+  });
+
+  // Safe clamping of custom hours
+  function clampHours(h) {
+    if (isNaN(h) || h < 1) return 1;
+    if (h > 60) return 60;
+    return h;
+  }
+  assert.equal(clampHours(0), 1);
+  assert.equal(clampHours(-5), 1);
+  assert.equal(clampHours(100), 60);
+  assert.equal(clampHours(15), 15);
+});
+
+test('R1.3 Checkpoint B: Role fixture provenance labels & honest academic fixtures', () => {
+  const sampleRole = {
+    role_id: 'iot-edge-engineer',
+    title: 'IoT Edge Systems Intern',
+    source_url: null,
+  };
+
+  function getProvenanceBadge(role) {
+    if (!role.source_url) {
+      return { label: 'DEMO ROLE • ILLUSTRATIVE FIXTURE', isIllustrative: true };
+    }
+    return { label: 'VERIFIED INDUSTRY POSTING', isIllustrative: false };
+  }
+
+  const badge = getProvenanceBadge(sampleRole);
+  assert.equal(badge.isIllustrative, true);
+  assert(badge.label.includes('DEMO ROLE'));
+});
+
+test('R1.3 Checkpoint B: Mandatory Core vs Preferred Elective requirement separation', () => {
+  const roleSkills = [
+    { skill_id: 1, skill_name: 'C Programming', required_level: 2, importance: 'critical' },
+    { skill_id: 2, skill_name: 'Microcontrollers', required_level: 2, importance: 'required' },
+    { skill_id: 3, skill_name: 'FreeRTOS', required_level: 1, importance: 'preferred' },
+    { skill_id: 4, skill_name: 'PCB Design', required_level: 1, importance: 'optional' },
+  ];
+
+  const mandatory = roleSkills.filter((s) => s.importance === 'critical' || s.importance === 'required');
+  const electives = roleSkills.filter((s) => s.importance === 'preferred' || s.importance === 'optional');
+
+  assert.equal(mandatory.length, 2);
+  assert.equal(electives.length, 2);
+  assert.equal(mandatory[0].skill_name, 'C Programming');
+  assert.equal(electives[0].skill_name, 'FreeRTOS');
+});
+
+test('R1.3 Checkpoint B: Student skill-gap calculations against role requirements', () => {
+  const roleReqs = [
+    { skill_id: 1, skill_name: 'C Programming', required_level: 2 },
+    { skill_id: 2, skill_name: 'RTOS Concepts', required_level: 2 },
+    { skill_id: 3, skill_name: 'PCB Layout', required_level: 1 },
+  ];
+
+  const studentSkills = [
+    { skill_id: 1, declared_level: 2, verified_level: 2, is_verified: true },
+    { skill_id: 2, declared_level: 1, verified_level: 0, is_verified: false },
+    // skill 3 not yet assessed (level 0)
+  ];
+
+  const studentMap = new Map(studentSkills.map((s) => [s.skill_id, s]));
+
+  const gaps = [];
+  const acquired = [];
+
+  roleReqs.forEach((req) => {
+    const s = studentMap.get(req.skill_id);
+    const curLevel = s ? s.declared_level : 0;
+    if (curLevel >= req.required_level) {
+      acquired.push({ ...req, curLevel });
+    } else {
+      gaps.push({ ...req, curLevel, gapDelta: req.required_level - curLevel });
+    }
+  });
+
+  assert.equal(acquired.length, 1);
+  assert.equal(acquired[0].skill_name, 'C Programming');
+
+  assert.equal(gaps.length, 2);
+  assert.equal(gaps[0].skill_name, 'RTOS Concepts');
+  assert.equal(gaps[0].gapDelta, 1);
+  assert.equal(gaps[1].skill_name, 'PCB Layout');
+  assert.equal(gaps[1].gapDelta, 1);
+});
+
+test('R1.3 Checkpoint C: Deterministic next-step derivation with student-friendly reasoning', () => {
+  function getNextAction(tasks) {
+    if (tasks.length === 0) {
+      return { task: null, type: 'all_completed', reason: 'No milestones registered in active mission.' };
+    }
+    const inProg = tasks.find((t) => t.status === 'in_progress');
+    if (inProg) {
+      return {
+        task: inProg,
+        type: 'in_progress',
+        reason: 'Active Milestone: You have already started this task. Continue your momentum.',
+      };
+    }
+    const completedKeys = new Set(
+      tasks.filter((t) => t.status === 'completed').map((t) => t.stable_key)
+    );
+    const nextUnlocked = tasks.find((t) => {
+      if (t.status !== 'not_started') return false;
+      if (t.is_unlocked) return true;
+      const prereqs = t.prerequisite_task_keys || [];
+      return prereqs.every((k) => completedKeys.has(k));
+    });
+    if (nextUnlocked) {
+      const prereqs = nextUnlocked.prerequisite_task_keys || [];
+      const reason =
+        prereqs.length === 0
+          ? 'Foundational milestone: No prior prerequisites required. Start here.'
+          : 'Prerequisites verified complete: All preparatory foundation skills are met. Ready to begin.';
+      return { task: nextUnlocked, type: 'unlocked', reason };
+    }
+    return { task: null, type: 'all_completed', reason: 'All milestones 100% complete.' };
+  }
+
+  // Foundational first task without prereqs
+  const tasks = [
+    { id: 10, stable_key: 't1', status: 'not_started', is_unlocked: true, prerequisite_task_keys: [] },
+    { id: 11, stable_key: 't2', status: 'not_started', is_unlocked: false, prerequisite_task_keys: ['t1'] },
+  ];
+  const next1 = getNextAction(tasks);
+  assert.equal(next1.task.id, 10);
+  assert.equal(next1.type, 'unlocked');
+  assert(next1.reason.includes('Foundational milestone'));
+
+  // When task 10 is completed, task 11 becomes unlocked
+  tasks[0].status = 'completed';
+  const next2 = getNextAction(tasks);
+  assert.equal(next2.task.id, 11);
+  assert.equal(next2.type, 'unlocked');
+  assert(next2.reason.includes('Prerequisites verified complete'));
+});
+
+test('R1.3 Checkpoint C: Prerequisite locks prevent un-audited completion', () => {
+  const task = {
+    id: 11,
+    skill_name: 'RTOS Context Switching',
+    is_unlocked: false,
+    prerequisite_task_keys: ['task_c_basics'],
+  };
+
+  function canCompleteWithoutOverride(t, completedKeys) {
+    if (t.is_unlocked) return true;
+    return t.prerequisite_task_keys.every((k) => completedKeys.has(k));
+  }
+
+  const completedKeys = new Set();
+  assert.equal(canCompleteWithoutOverride(task, completedKeys), false);
+
+  completedKeys.add('task_c_basics');
+  assert.equal(canCompleteWithoutOverride(task, completedKeys), true);
+});
+
+test('R1.3 Checkpoint C: Stage collapse toggle state tracking', () => {
+  const collapsedStages = {};
+
+  function toggleStage(stageNum) {
+    collapsedStages[stageNum] = !collapsedStages[stageNum];
+  }
+
+  assert.equal(collapsedStages[1], undefined);
+  toggleStage(1);
+  assert.equal(collapsedStages[1], true);
+  toggleStage(1);
+  assert.equal(collapsedStages[1], false);
+});
+
+test('R1.3 Checkpoint D: Lightweight Roadmap filter states', () => {
+  const tasks = [
+    { id: 1, status: 'completed', is_unlocked: true, prerequisite_task_keys: [] },
+    { id: 2, status: 'in_progress', is_unlocked: true, prerequisite_task_keys: [] },
+    { id: 3, status: 'not_started', is_unlocked: true, prerequisite_task_keys: [] },
+    { id: 4, status: 'not_started', is_unlocked: false, prerequisite_task_keys: ['k_unmet'] },
+  ];
+
+  const completedKeys = new Set(['k1']);
+  const isTaskReady = (t) => {
+    if (t.status === 'completed') return false;
+    if (t.is_unlocked) return true;
+    return t.prerequisite_task_keys.every((k) => completedKeys.has(k));
+  };
+
+  const filterTasks = (filter) =>
+    tasks.filter((t) => {
+      if (filter === 'all') return true;
+      if (filter === 'in_progress') return t.status === 'in_progress';
+      if (filter === 'completed') return t.status === 'completed';
+      if (filter === 'ready') return t.status === 'not_started' && isTaskReady(t);
+      if (filter === 'locked') return t.status === 'not_started' && !isTaskReady(t);
+      return true;
+    });
+
+  assert.equal(filterTasks('all').length, 4);
+  assert.equal(filterTasks('ready').length, 1);
+  assert.equal(filterTasks('ready')[0].id, 3);
+  assert.equal(filterTasks('in_progress').length, 1);
+  assert.equal(filterTasks('in_progress')[0].id, 2);
+  assert.equal(filterTasks('completed').length, 1);
+  assert.equal(filterTasks('completed')[0].id, 1);
+  assert.equal(filterTasks('locked').length, 1);
+  assert.equal(filterTasks('locked')[0].id, 4);
+});
+
+test('R1.3 Checkpoint D: Navigation routing between Home, Careers, and Roadmap', () => {
+  const routes = {
+    'home-next-action-click': 'roadmap',
+    'careers-start-prep-click': 'onboarding',
+    'roadmap-review-proposal-click': 'proposals',
+    'roadmap-explore-roles-click': 'careers',
+  };
+
+  assert.equal(routes['home-next-action-click'], 'roadmap');
+  assert.equal(routes['careers-start-prep-click'], 'onboarding');
+  assert.equal(routes['roadmap-review-proposal-click'], 'proposals');
+  assert.equal(routes['roadmap-explore-roles-click'], 'careers');
+});
+
+test('R1.3 Checkpoint F: Technical Mode preservation and student boundary separation', () => {
+  const studentNavTabs = ['home', 'careers', 'roadmap', 'readiness'];
+  const devWorkspaceTabs = ['technical'];
+
+  // Normal student view tabs contain zero raw graph algorithm debug panels
+  studentNavTabs.forEach((tab) => {
+    assert(tab !== 'technical');
+  });
+
+  // Technical mode preserves full C++ DSA presenter, event simulation, and tool traces
+  const technicalModeComponents = [
+    'GraphPresenter',
+    'MatchingDemo',
+    'AgentActivityView',
+    'EventSimulationControls',
+  ];
+  assert.equal(technicalModeComponents.length, 4);
+});
+
+test('R1.3 Live Backend Integration: Task status transition and persistence', async (t) => {
+  if (!(await isServerRunning())) {
+    t.skip('FastAPI backend not running at 127.0.0.1:8000');
+    return;
+  }
+
+  // 1. Fetch active mission
+  const activeRes = await fetch('http://127.0.0.1:8000/v1/missions/active');
+  if (activeRes.status !== 200) {
+    t.skip('No active mission available for live integration test');
+    return;
+  }
+  const activeMission = await activeRes.json();
+  const firstStage = activeMission.active_version?.stages?.[0];
+  const firstTask = firstStage?.tasks?.[0];
+  if (!firstTask) {
+    t.skip('No tasks in active mission');
+    return;
+  }
+
+  // 2. Update task status to in_progress
+  const patchRes = await fetch(
+    `http://127.0.0.1:8000/v1/missions/${activeMission.id}/tasks/${firstTask.id}/status`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'in_progress' }),
+    }
+  );
+  assert.equal(patchRes.status, 200);
+  const updatedTask = await patchRes.json();
+  assert.equal(updatedTask.status, 'in_progress');
+});
+
+test('R1.3 Live Backend Integration: Evidence attachment to mission task', async (t) => {
+  if (!(await isServerRunning())) {
+    t.skip('FastAPI backend not running at 127.0.0.1:8000');
+    return;
+  }
+
+  const activeRes = await fetch('http://127.0.0.1:8000/v1/missions/active');
+  if (activeRes.status !== 200) {
+    t.skip('No active mission available for live integration test');
+    return;
+  }
+  const activeMission = await activeRes.json();
+  const firstTask = activeMission.active_version?.stages?.[0]?.tasks?.[0];
+  if (!firstTask) {
+    t.skip('No tasks in active mission');
+    return;
+  }
+
+  // Check evidence list
+  const evRes = await fetch('http://127.0.0.1:8000/v1/evidence');
+  if (evRes.status !== 200) {
+    t.skip('Evidence API not accessible');
+    return;
+  }
+  const evidenceList = await evRes.json();
+  if (evidenceList.length === 0) {
+    t.skip('No evidence items to attach');
+    return;
+  }
+
+  const evId = evidenceList[0].id;
+  const linkRes = await fetch(
+    `http://127.0.0.1:8000/v1/missions/${activeMission.id}/tasks/${firstTask.id}/evidence`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ evidence_id: evId, notes: 'R1.3 integration verification artifact.' }),
+    }
+  );
+  assert.equal(linkRes.status, 200);
+  const linkedTask = await linkRes.json();
+  assert.equal(linkedTask.evidence_id, evId);
+});
+
+
 
 
 

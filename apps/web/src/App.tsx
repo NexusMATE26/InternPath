@@ -346,6 +346,7 @@ export default function App() {
               onNavigateToRoadmap={() => setActiveTab('roadmap')}
               onNavigateToReadiness={() => setActiveTab('readiness')}
               onStartOnboarding={handleStartOnboarding}
+              studentSkills={studentSkills}
             />
           )}
 

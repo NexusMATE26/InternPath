@@ -332,8 +332,14 @@ def update_student_profile(
             if sid in current_skills:
                 rec = current_skills[sid]
                 rec.declared_level = lvl
-                rec.verified_level = ver_lvl
-                rec.is_verified = is_ver
+                # A1 Safeguard: Independently verified skills must not be downgraded or erased
+                # by student self-assessment updates. Preserve verified status and level if already verified.
+                if rec.is_verified:
+                    if is_ver and ver_lvl > rec.verified_level:
+                        rec.verified_level = ver_lvl
+                else:
+                    rec.verified_level = ver_lvl
+                    rec.is_verified = is_ver
             else:
                 new_rec = StudentSkill(
                     student_id=student_id,

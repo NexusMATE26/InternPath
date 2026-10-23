@@ -170,6 +170,72 @@ export default function CareerMissionView({
   const [simulating, setSimulating] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
 
+  // R1.3 Filtering, Collapsing, and Task Inspection State
+  const [taskFilter, setTaskFilter] = useState<'all' | 'ready' | 'in_progress' | 'completed' | 'locked'>('all');
+  const [collapsedStages, setCollapsedStages] = useState<Record<number, boolean>>({});
+  const [inspectedTask, setInspectedTask] = useState<MissionTask | null>(null);
+
+  function toggleStageCollapse(stageNumber: number) {
+    setCollapsedStages((prev) => ({
+      ...prev,
+      [stageNumber]: !prev[stageNumber],
+    }));
+  }
+
+  // Deterministic next action derivation rule
+  function getNextAction(tasks: MissionTask[]): {
+    task: MissionTask | null;
+    type: 'in_progress' | 'unlocked' | 'all_completed';
+    reason: string;
+  } {
+    if (tasks.length === 0) {
+      return { task: null, type: 'all_completed', reason: 'No milestones registered in active mission.' };
+    }
+    const inProg = tasks.find((t) => t.status === 'in_progress');
+    if (inProg) {
+      return {
+        task: inProg,
+        type: 'in_progress',
+        reason: 'Active Milestone: You have already started this task. Continue your momentum.',
+      };
+    }
+    const completedKeys = new Set(
+      tasks.filter((t) => t.status === 'completed').map((t) => t.stable_key)
+    );
+    const nextUnlocked = tasks.find((t) => {
+      if (t.status !== 'not_started') return false;
+      if (t.is_unlocked) return true;
+      const prereqs = t.prerequisite_task_keys || [];
+      return prereqs.every((k) => completedKeys.has(k));
+    });
+    if (nextUnlocked) {
+      const prereqs = nextUnlocked.prerequisite_task_keys || [];
+      const reason =
+        prereqs.length === 0
+          ? 'Foundational milestone: No prior prerequisites required. Start here.'
+          : 'Prerequisites verified complete: All preparatory foundation skills are met. Ready to begin.';
+      return {
+        task: nextUnlocked,
+        type: 'unlocked',
+        reason,
+      };
+    }
+    const allDone = tasks.every((t) => t.status === 'completed');
+    if (allDone) {
+      return {
+        task: null,
+        type: 'all_completed',
+        reason: 'All roadmap milestones are 100% completed! You have met all target requirements.',
+      };
+    }
+    const firstPending = tasks.find((t) => t.status === 'not_started');
+    return {
+      task: firstPending || null,
+      type: 'unlocked',
+      reason: 'Next milestone in curriculum sequence.',
+    };
+  }
+
   // Fetch active mission
   async function fetchActiveMission() {
     setLoading(true);
@@ -494,6 +560,25 @@ export default function CareerMissionView({
 
   const activeVersion = mission.active_version;
   const stages = activeVersion?.stages || [];
+  const allTasks = stages.flatMap((s) => s.tasks);
+  const nextAction = getNextAction(allTasks);
+
+  const completedKeys = new Set(
+    allTasks.filter((t) => t.status === 'completed').map((t) => t.stable_key)
+  );
+
+  const isTaskReady = (t: MissionTask) => {
+    if (t.status === 'completed') return false;
+    if (t.is_unlocked) return true;
+    const prereqs = t.prerequisite_task_keys || [];
+    return prereqs.every((k) => completedKeys.has(k));
+  };
+
+  const countAll = allTasks.length;
+  const countReady = allTasks.filter((t) => t.status === 'not_started' && isTaskReady(t)).length;
+  const countInProgress = allTasks.filter((t) => t.status === 'in_progress').length;
+  const countCompleted = allTasks.filter((t) => t.status === 'completed').length;
+  const countLocked = allTasks.filter((t) => t.status === 'not_started' && !isTaskReady(t)).length;
 
   return (
     <div className="career-mission-container">
@@ -527,7 +612,7 @@ export default function CareerMissionView({
         </div>
       </div>
 
-      {/* Overview Metric Cards */}
+      {/* Section 1: Overview Metric Cards */}
       <div className="mission-overview-grid">
         <div className="metric-card progress-card">
           <div className="card-label">MISSION READINESS</div>
@@ -619,6 +704,122 @@ export default function CareerMissionView({
       {/* ========================================================= */}
       {activeSubTab === 'roadmap' && (
         <div className="roadmap-container">
+          {/* Section 5: Proposed adjustments banner */}
+          {mission.pending_proposals_count > 0 && (
+            <div className="roadmap-proposal-alert-banner">
+              <div className="proposal-alert-info">
+                <span className="alert-bell-icon">💡</span>
+                <div>
+                  <strong>Your learning plan has a suggested update.</strong>
+                  <p>
+                    The planner has prepared a proposed roadmap revision. Review the differences and choose whether to accept or decline.
+                  </p>
+                </div>
+              </div>
+              <button
+                id="btn-banner-review-proposal"
+                className="btn-secondary"
+                onClick={() => setActiveSubTab('proposals')}
+              >
+                Review Suggested Changes →
+              </button>
+            </div>
+          )}
+
+          {/* Section 2: Prominently show ONE recommended actionable task */}
+          {nextAction.task && (
+            <div className="roadmap-next-step-hero">
+              <div className="next-step-top-row">
+                <span className="badge-next-step">
+                  {nextAction.type === 'in_progress' ? '⚡ CURRENT FOCUS' : '🎯 RECOMMENDED NEXT STEP'}
+                </span>
+                <span className="task-effort-tag">
+                  ⏱ {nextAction.task.estimated_hours_min}–{nextAction.task.estimated_hours_max}h estimated effort
+                </span>
+              </div>
+              <div className="next-step-main-row">
+                <div className="next-step-task-info">
+                  <h3>
+                    {nextAction.task.skill_name}{' '}
+                    <span className="level-progression">
+                      (Level {nextAction.task.current_level} → {nextAction.task.target_level})
+                    </span>
+                  </h3>
+                  <div className="next-step-reason-box">
+                    <b>Why this step?</b> {nextAction.reason}
+                  </div>
+                  <p className="next-step-criteria-excerpt">
+                    <b>Goal:</b> {nextAction.task.completion_criteria}
+                  </p>
+                </div>
+                <div className="next-step-actions-group">
+                  {nextAction.task.status === 'not_started' && (
+                    <button
+                      id={`btn-hero-start-${nextAction.task.id}`}
+                      className="btn-primary"
+                      onClick={() => handleUpdateStatus(nextAction.task!, 'in_progress')}
+                    >
+                      ▶ Begin This Task
+                    </button>
+                  )}
+                  {nextAction.task.status === 'in_progress' && (
+                    <button
+                      id={`btn-hero-complete-${nextAction.task.id}`}
+                      className="btn-primary"
+                      onClick={() => handleUpdateStatus(nextAction.task!, 'completed')}
+                    >
+                      ✓ Mark as Complete
+                    </button>
+                  )}
+                  <button
+                    className="btn-secondary"
+                    onClick={() => setInspectedTask(nextAction.task)}
+                  >
+                    🔍 View Task Details
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Section 4 Filter Bar */}
+          <div className="roadmap-filter-bar">
+            <span style={{ fontSize: '12px', fontWeight: 700, color: '#64748b', marginRight: '4px' }}>
+              Filter:
+            </span>
+            <button
+              className={`filter-pill-btn ${taskFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setTaskFilter('all')}
+            >
+              All Tasks <span className="filter-pill-count">{countAll}</span>
+            </button>
+            <button
+              className={`filter-pill-btn ${taskFilter === 'ready' ? 'active' : ''}`}
+              onClick={() => setTaskFilter('ready')}
+            >
+              Ready Now <span className="filter-pill-count">{countReady}</span>
+            </button>
+            <button
+              className={`filter-pill-btn ${taskFilter === 'in_progress' ? 'active' : ''}`}
+              onClick={() => setTaskFilter('in_progress')}
+            >
+              In Progress <span className="filter-pill-count">{countInProgress}</span>
+            </button>
+            <button
+              className={`filter-pill-btn ${taskFilter === 'completed' ? 'active' : ''}`}
+              onClick={() => setTaskFilter('completed')}
+            >
+              Completed <span className="filter-pill-count">{countCompleted}</span>
+            </button>
+            <button
+              className={`filter-pill-btn ${taskFilter === 'locked' ? 'active' : ''}`}
+              onClick={() => setTaskFilter('locked')}
+            >
+              Locked <span className="filter-pill-count">{countLocked}</span>
+            </button>
+          </div>
+
+          {/* Section 3: Learning Journey with collapsible stages */}
           {stages.length === 0 ? (
             <div className="panel p-4">No stages found in this plan.</div>
           ) : (
@@ -627,17 +828,34 @@ export default function CareerMissionView({
                 stage.total_tasks > 0
                   ? Math.round((stage.completed_tasks / stage.total_tasks) * 100)
                   : 0;
+              const isCollapsed = collapsedStages[stage.stage_number];
+
+              const filteredTasks = stage.tasks.filter((t) => {
+                if (taskFilter === 'all') return true;
+                if (taskFilter === 'in_progress') return t.status === 'in_progress';
+                if (taskFilter === 'completed') return t.status === 'completed';
+                if (taskFilter === 'ready') return t.status === 'not_started' && isTaskReady(t);
+                if (taskFilter === 'locked') return t.status === 'not_started' && !isTaskReady(t);
+                return true;
+              });
 
               return (
                 <div key={stage.stage_number} className="stage-section">
                   <div className="stage-header-card">
                     <div className="stage-title-group">
+                      <button
+                        className="stage-collapse-btn"
+                        onClick={() => toggleStageCollapse(stage.stage_number)}
+                        title="Toggle stage expansion"
+                      >
+                        {isCollapsed ? '▶ Expand' : '▼ Collapse'}
+                      </button>
                       <span className="stage-badge">STAGE {stage.stage_number}</span>
                       <h3 className="stage-title-text">{stage.stage_title}</h3>
                     </div>
                     <div className="stage-meta-group">
                       <span className="stage-hours-meta">
-                        ⏱ {stage.stage_hours_min}–{stage.stage_hours_max} hrs
+                        ⏱ {stage.stage_hours_min}–{stage.stage_hours_max} hrs (est.)
                       </span>
                       <span className="stage-progress-meta">
                         {stage.completed_tasks}/{stage.total_tasks} Complete ({stagePct}%)
@@ -645,137 +863,154 @@ export default function CareerMissionView({
                     </div>
                   </div>
 
-                  <div className="stage-tasks-grid">
-                    {stage.tasks.map((task) => {
-                      const isCompleted = task.status === 'completed';
-                      const isInProgress = task.status === 'in_progress';
-
-                      return (
-                        <div
-                          key={task.id}
-                          id={`task-card-${task.id}`}
-                          className={`task-card status-${task.status} ${
-                            !task.is_unlocked && !isCompleted ? 'locked' : ''
-                          }`}
-                        >
-                          <div className="task-card-top">
-                            <div className="task-badges-row">
-                              <span className="badge-category">{task.category}</span>
-                              <span className={`badge-status ${task.status}`}>
-                                {task.status === 'completed'
-                                  ? '✓ Completed'
-                                  : task.status === 'in_progress'
-                                  ? '⚡ In Progress'
-                                  : 'Not Started'}
-                              </span>
-                              {!task.is_unlocked && !isCompleted && (
-                                <span
-                                  className="badge-locked"
-                                  title="Prerequisites must be completed first or explicitly overridden"
-                                >
-                                  🔒 Locked
-                                </span>
-                              )}
-                              {task.evidence_id && (
-                                <span className="badge-evidence-linked" title="Evidence attached">
-                                  📎 Evidence Attached
-                                </span>
-                              )}
-                            </div>
-
-                            <span className="task-effort-tag">
-                              {task.estimated_hours_min}–{task.estimated_hours_max}h
-                            </span>
-                          </div>
-
-                          <h4 className="task-skill-heading">
-                            {task.skill_name}{' '}
-                            <span className="level-progression">
-                              (L{task.current_level} ➔ L{task.target_level})
-                            </span>
-                          </h4>
-
-                          {/* Completion criteria */}
-                          <div className="criteria-box">
-                            <div className="criteria-title">COMPLETION CRITERIA:</div>
-                            <p className="criteria-text">{task.completion_criteria}</p>
-                          </div>
-
-                          {/* Prerequisites summary */}
-                          {task.prerequisite_task_keys.length > 0 && (
-                            <div className="task-prereqs-info">
-                              <span className="prereq-label">Prerequisites:</span>
-                              {task.prerequisite_task_keys.map((k) => (
-                                <span key={k} className="prereq-chip">
-                                  {k.replace('task_skill_', 'Skill ').replace('_lvl_', ' Level ')}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          {/* Completed audit info */}
-                          {task.override_reason && (
-                            <div className="override-flag">
-                              <b>Prerequisite Override:</b> {task.override_reason}
-                            </div>
-                          )}
-
-                          {/* Action Buttons */}
-                          <div className="task-card-actions">
-                            {task.status === 'not_started' && (
-                              <button
-                                id={`btn-start-${task.id}`}
-                                className="btn-task-action btn-start"
-                                onClick={() => handleUpdateStatus(task, 'in_progress')}
-                              >
-                                ▶ Start Task
-                              </button>
-                            )}
-
-                            {isInProgress && (
-                              <button
-                                id={`btn-complete-${task.id}`}
-                                className="btn-task-action btn-complete"
-                                onClick={() => handleUpdateStatus(task, 'completed')}
-                              >
-                                ✓ Mark Complete
-                              </button>
-                            )}
-
-                            {isCompleted && (
-                              <button
-                                className="btn-task-action btn-reopen"
-                                onClick={() => handleUpdateStatus(task, 'in_progress')}
-                                title="Reopen task if additional study is needed"
-                              >
-                                ↺ Reopen
-                              </button>
-                            )}
-
-                            <button
-                              id={`btn-evidence-${task.id}`}
-                              className="btn-task-action btn-evidence"
-                              onClick={() => {
-                                setLinkEvidenceTask(task);
-                                setSelectedEvidenceId(task.evidence_id || '');
-                                setEvidenceLinkNotes('');
-                              }}
-                            >
-                              📎 Evidence
-                            </button>
-
-                            <button
-                              id={`btn-history-${task.id}`}
-                              className="btn-task-action btn-history"
-                              onClick={() => openTaskHistory(task)}
-                            >
-                              📜 History
-                            </button>
-                          </div>
+                  {!isCollapsed && (
+                    <div className="stage-tasks-grid">
+                      {filteredTasks.length === 0 ? (
+                        <div style={{ padding: '16px', color: '#64748b', fontSize: '13px' }}>
+                          No tasks match the selected filter in this stage.
                         </div>
-                      );
-                    })}
-                  </div>
+                      ) : (
+                        filteredTasks.map((task) => {
+                          const isCompleted = task.status === 'completed';
+                          const isInProgress = task.status === 'in_progress';
+                          const isReady = isTaskReady(task);
+
+                          return (
+                            <div
+                              key={task.id}
+                              id={`task-card-${task.id}`}
+                              className={`task-card status-${task.status} ${
+                                !task.is_unlocked && !isCompleted && !isReady ? 'locked' : ''
+                              }`}
+                            >
+                              <div className="task-card-top">
+                                <div className="task-badges-row">
+                                  <span className="badge-category">{task.category}</span>
+                                  <span className={`badge-status ${task.status}`}>
+                                    {task.status === 'completed'
+                                      ? '✓ Completed'
+                                      : task.status === 'in_progress'
+                                      ? '⚡ In Progress'
+                                      : 'Not Started'}
+                                  </span>
+                                  {!task.is_unlocked && !isCompleted && !isReady && (
+                                    <span
+                                      className="badge-locked"
+                                      title="Prerequisites must be completed first or explicitly overridden"
+                                    >
+                                      🔒 Locked
+                                    </span>
+                                  )}
+                                  {task.evidence_id && (
+                                    <span className="badge-evidence-linked" title="Evidence attached">
+                                      📎 Evidence Attached
+                                    </span>
+                                  )}
+                                </div>
+
+                                <span className="task-effort-tag">
+                                  {task.estimated_hours_min}–{task.estimated_hours_max}h
+                                </span>
+                              </div>
+
+                              <h4 className="task-skill-heading">
+                                {task.skill_name}{' '}
+                                <span className="level-progression">
+                                  (L{task.current_level} ➔ L{task.target_level})
+                                </span>
+                              </h4>
+
+                              {/* Completion criteria */}
+                              <div className="criteria-box">
+                                <div className="criteria-title">COMPLETION CRITERIA:</div>
+                                <p className="criteria-text">{task.completion_criteria}</p>
+                              </div>
+
+                              {/* Prerequisites summary */}
+                              {task.prerequisite_task_keys.length > 0 && (
+                                <div className="task-prereqs-info">
+                                  <span className="prereq-label">Prerequisites:</span>
+                                  {task.prerequisite_task_keys.map((k) => (
+                                    <span key={k} className="prereq-chip">
+                                      {k.replace('task_skill_', 'Skill ').replace('_lvl_', ' Level ')}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Completed audit info */}
+                              {task.override_reason && (
+                                <div className="override-flag">
+                                  <b>Prerequisite Override:</b> {task.override_reason}
+                                </div>
+                              )}
+
+                              {/* Action Buttons */}
+                              <div className="task-card-actions">
+                                {task.status === 'not_started' && (
+                                  <button
+                                    id={`btn-start-${task.id}`}
+                                    className="btn-task-action btn-start"
+                                    onClick={() => handleUpdateStatus(task, 'in_progress')}
+                                  >
+                                    ▶ Start Task
+                                  </button>
+                                )}
+
+                                {isInProgress && (
+                                  <button
+                                    id={`btn-complete-${task.id}`}
+                                    className="btn-task-action btn-complete"
+                                    onClick={() => handleUpdateStatus(task, 'completed')}
+                                  >
+                                    ✓ Mark Complete
+                                  </button>
+                                )}
+
+                                {isCompleted && (
+                                  <button
+                                    className="btn-task-action btn-reopen"
+                                    onClick={() => handleUpdateStatus(task, 'in_progress')}
+                                    title="Reopen task if additional study is needed"
+                                  >
+                                    ↺ Reopen
+                                  </button>
+                                )}
+
+                                <button
+                                  className="btn-task-action btn-history"
+                                  onClick={() => setInspectedTask(task)}
+                                  title="View full task details and learning context"
+                                >
+                                  🔍 Details
+                                </button>
+
+                                <button
+                                  id={`btn-evidence-${task.id}`}
+                                  className="btn-task-action btn-evidence"
+                                  onClick={() => {
+                                    setLinkEvidenceTask(task);
+                                    setSelectedEvidenceId(task.evidence_id || '');
+                                    setEvidenceLinkNotes('');
+                                  }}
+                                >
+                                  📎 Evidence
+                                </button>
+
+                                <button
+                                  id={`btn-history-${task.id}`}
+                                  className="btn-task-action btn-history"
+                                  onClick={() => openTaskHistory(task)}
+                                >
+                                  📜 History
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -1246,6 +1481,152 @@ export default function CareerMissionView({
                 disabled={simulating || !simTitle.trim() || !simRationale.trim()}
               >
                 {simulating ? 'Evaluating & Staging...' : 'Generate Change Proposal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL 5: TASK DETAIL INSPECTION MODAL (R1.3)             */}
+      {/* ========================================================= */}
+      {inspectedTask && (
+        <div className="modal-backdrop" onClick={() => setInspectedTask(null)}>
+          <div className="task-detail-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <span className="badge-category">{inspectedTask.category}</span>
+                <h3 style={{ margin: '4px 0 0', fontSize: '18px' }}>
+                  {inspectedTask.skill_name}{' '}
+                  <span className="level-progression">
+                    (Level {inspectedTask.current_level} ➔ {inspectedTask.target_level})
+                  </span>
+                </h3>
+              </div>
+              <button className="modal-close" onClick={() => setInspectedTask(null)}>
+                ✕
+              </button>
+            </div>
+
+            <div className="task-detail-body">
+              {/* What to learn & Goal */}
+              <div className="detail-section-box">
+                <span className="detail-label">🎯 EXPECTED OUTCOME & COMPLETION CRITERIA</span>
+                <p>{inspectedTask.completion_criteria}</p>
+              </div>
+
+              {/* Why it matters */}
+              <div className="detail-section-box">
+                <span className="detail-label">💡 WHY THIS TASK MATTERS</span>
+                <p>
+                  {inspectedTask.rationale ||
+                    `Mastering ${inspectedTask.skill_name} establishes critical competency required for your target internship role.`}
+                </p>
+              </div>
+
+              {/* Prerequisites Breakdown */}
+              <div className="detail-section-box">
+                <span className="detail-label">🔗 PREREQUISITE DEPENDENCIES</span>
+                {inspectedTask.prerequisite_task_keys && inspectedTask.prerequisite_task_keys.length > 0 ? (
+                  <div className="prereq-status-list">
+                    {inspectedTask.prerequisite_task_keys.map((k) => {
+                      const isMet = completedKeys.has(k);
+                      return (
+                        <div key={k} className="prereq-status-item">
+                          <span>{k.replace('task_skill_', 'Skill ').replace('_lvl_', ' Level ')}</span>
+                          <span className={isMet ? 'badge-prereq-met' : 'badge-prereq-pending'}>
+                            {isMet ? '✓ Completed' : '⏳ Pending Prerequisite'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p>No prior prerequisites required. This is a foundational milestone ready for immediate study.</p>
+                )}
+              </div>
+
+              {/* Estimated Effort */}
+              <div className="detail-section-box">
+                <span className="detail-label">⏱ ESTIMATED EFFORT BENCHMARK</span>
+                <p>
+                  <b>{inspectedTask.estimated_hours_min}–{inspectedTask.estimated_hours_max} hours</b> (Illustrative estimate for planning; your actual pace will depend on prior hands-on lab experience).
+                </p>
+              </div>
+
+              {/* Portfolio Evidence */}
+              <div className="detail-section-box">
+                <span className="detail-label">📎 SUPPORTING EVIDENCE</span>
+                {inspectedTask.evidence_id ? (
+                  <div>
+                    {(() => {
+                      const ev = evidenceList.find((e) => e.id === inspectedTask.evidence_id);
+                      return ev ? (
+                        <p>
+                          Linked: <b>{ev.title}</b> ({ev.evidence_type})
+                          {ev.verified_by_staff ? ' • Staff Verified' : ' • Self Reported'}
+                        </p>
+                      ) : (
+                        <p>Evidence item #{inspectedTask.evidence_id} linked.</p>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <p>No portfolio evidence attached yet. You can attach project links or lab reports to verify readiness.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {inspectedTask.status === 'not_started' && (
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      handleUpdateStatus(inspectedTask, 'in_progress');
+                      setInspectedTask(null);
+                    }}
+                  >
+                    ▶ Start Task
+                  </button>
+                )}
+                {inspectedTask.status === 'in_progress' && (
+                  <button
+                    className="btn-primary"
+                    onClick={() => {
+                      handleUpdateStatus(inspectedTask, 'completed');
+                      setInspectedTask(null);
+                    }}
+                  >
+                    ✓ Mark Complete
+                  </button>
+                )}
+                {inspectedTask.status === 'completed' && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      handleUpdateStatus(inspectedTask, 'in_progress');
+                      setInspectedTask(null);
+                    }}
+                  >
+                    ↺ Reopen Task
+                  </button>
+                )}
+                <button
+                  className="btn-secondary"
+                  onClick={() => {
+                    const t = inspectedTask;
+                    setInspectedTask(null);
+                    setLinkEvidenceTask(t);
+                    setSelectedEvidenceId(t.evidence_id || '');
+                    setEvidenceLinkNotes('');
+                  }}
+                >
+                  📎 Attach Evidence
+                </button>
+              </div>
+              <button className="btn-secondary" onClick={() => setInspectedTask(null)}>
+                Close
               </button>
             </div>
           </div>

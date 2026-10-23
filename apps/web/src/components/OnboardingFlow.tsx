@@ -30,6 +30,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const [reqsLoading, setReqsLoading] = useState(false);
   // skillId -> declaredLevel (0 = not learned, 1 = basic, 2 = intermediate, 3 = advanced)
   const [skillRatings, setSkillRatings] = useState<Record<number, number>>({});
+  // skillId -> verified state preserved from profile
+  const [profileVerifiedState, setProfileVerifiedState] = useState<
+    Record<number, { is_verified: boolean; verified_level: number }>
+  >({});
 
   // Step 3: Availability & Deadlines
   const [weeklyHours, setWeeklyHours] = useState<number>(15);
@@ -78,15 +82,21 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           fetch('/v1/profile'),
         ]);
 
-        let existingRatings: Record<number, number> = {};
+        const verifiedMap: Record<number, { is_verified: boolean; verified_level: number }> = {};
+        const existingRatings: Record<number, number> = {};
         if (profileRes.ok) {
           const profile = await profileRes.json();
           if (profile.skills && Array.isArray(profile.skills)) {
             profile.skills.forEach((s: any) => {
               existingRatings[s.skill_id] = s.declared_level;
+              verifiedMap[s.skill_id] = {
+                is_verified: Boolean(s.is_verified),
+                verified_level: Number(s.verified_level || 0),
+              };
             });
           }
         }
+        setProfileVerifiedState(verifiedMap);
 
         if (reqsRes.ok) {
           const detail = await reqsRes.json();
@@ -148,14 +158,18 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     setStep(4);
 
     try {
-      // Phase A: Persist role-relevant self-assessments to Student Profile
+      // Phase A: Persist role-relevant self-assessments to Student Profile (preserving verified status)
       setSubmissionPhase('Saving competency ratings to student profile...');
-      const skillsPayload = Object.entries(skillRatings).map(([idStr, level]) => ({
-        skill_id: Number(idStr),
-        declared_level: level,
-        verified_level: 0,
-        is_verified: false,
-      }));
+      const skillsPayload = Object.entries(skillRatings).map(([idStr, level]) => {
+        const sid = Number(idStr);
+        const ver = profileVerifiedState[sid];
+        return {
+          skill_id: sid,
+          declared_level: level,
+          verified_level: ver?.verified_level ?? 0,
+          is_verified: ver?.is_verified ?? false,
+        };
+      });
 
       const profileRes = await fetch('/v1/profile', {
         method: 'PUT',
@@ -185,7 +199,22 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       });
 
       if (missionRes.status === 409) {
-        // Active mission conflict
+        // Active mission conflict: check if the student already has an active mission for this exact role
+        try {
+          const activeCheck = await fetch('/v1/missions/active');
+          if (activeCheck.ok) {
+            const activeData: CareerMission = await activeCheck.json();
+            if (activeData.target_role_id === selectedRoleId) {
+              // Already exists for this exact target role: adopt without destructive replace
+              setCreatedMission(activeData);
+              setStep(5);
+              return;
+            }
+          }
+        } catch {
+          // Fall through to confirmation modal
+        }
+
         setShowReplaceConfirmModal(true);
         setSubmitting(false);
         setStep(3); // return to Step 3 so student can confirm modal
@@ -466,10 +495,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             {/* Presets Grid */}
             <div className="hours-presets-grid">
               {[
-                { hrs: 5, label: 'Light', desc: '5 hrs/wk • Sustainable alongside heavy exams' },
-                { hrs: 10, label: 'Standard', desc: '10 hrs/wk • Balanced pace for semester study' },
-                { hrs: 15, label: 'Accelerated', desc: '15 hrs/wk • Recommended for internship prep' },
-                { hrs: 20, label: 'Intensive', desc: '20 hrs/wk • Fast-track during semester breaks' },
+                { hrs: 5, label: 'Steady Pace', desc: '5 hours/week • Steady pace alongside academic courses' },
+                { hrs: 10, label: 'Moderate Pace', desc: '10 hours/week • Balanced semester commitment' },
+                { hrs: 15, label: 'Dedicated Track', desc: '15 hours/week • Focused skill building' },
+                { hrs: 20, label: 'Intensive Track', desc: '20 hours/week • Vacation or dedicated study period' },
               ].map((preset) => {
                 const isSelected = weeklyHours === preset.hrs;
                 return (
@@ -629,8 +658,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                   {createdMission.estimated_remaining_hours_max} hrs
                 </span>
                 <small className="stat-desc">
-                  ~{Math.ceil((createdMission.estimated_remaining_hours_max || 10) / weeklyHours)} weeks
-                  at {weeklyHours} hrs/wk
+                  Pacing estimate: ~{Math.ceil((createdMission.estimated_remaining_hours_max || 10) / weeklyHours)} weeks
+                  at {weeklyHours} hrs/wk (actual duration depends on prior background)
                 </small>
               </div>
             </div>
