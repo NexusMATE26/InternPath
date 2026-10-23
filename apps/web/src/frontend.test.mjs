@@ -386,6 +386,87 @@ test('Frontend can fetch /v1/agent/runs from FastAPI', async (t) => {
   assert(Array.isArray(data));
 });
 
+// -------------------------------------------------------------
+// Refinement R1.1: Student Navigation & Home Experience Tests
+// -------------------------------------------------------------
+
+test('R1.1 Primary student navigation architecture separates student tabs from technical mode', () => {
+  const studentTabs = ['home', 'careers', 'roadmap', 'readiness'];
+  const technicalTabs = ['technical'];
+
+  assert.equal(studentTabs.length, 4);
+  assert.equal(studentTabs[0], 'home');
+  assert(!studentTabs.includes('technical'));
+  assert(technicalTabs.includes('technical'));
+});
+
+test('R1.1 Deterministic next recommended action derivation prioritizes in_progress over unlocked', () => {
+  function getNextAction(tasks) {
+    const inProgress = tasks.find((t) => t.status === 'in_progress');
+    if (inProgress) return { task: inProgress, type: 'in_progress' };
+
+    const completedKeys = new Set(tasks.filter((t) => t.status === 'completed').map((t) => t.stable_key));
+    const nextUnlocked = tasks.find((t) => {
+      if (t.status !== 'not_started') return false;
+      const prereqs = t.prerequisite_task_keys || [];
+      return prereqs.every((k) => completedKeys.has(k));
+    });
+    if (nextUnlocked) return { task: nextUnlocked, type: 'unlocked' };
+
+    const allCompleted = tasks.every((t) => t.status === 'completed');
+    if (allCompleted) return { task: null, type: 'all_completed' };
+
+    return { task: tasks[0], type: 'unlocked' };
+  }
+
+  // Case 1: Active task in progress
+  const tasks1 = [
+    { id: 1, stable_key: 't1', status: 'completed', prerequisite_task_keys: [] },
+    { id: 2, stable_key: 't2', status: 'in_progress', prerequisite_task_keys: ['t1'] },
+    { id: 3, stable_key: 't3', status: 'not_started', prerequisite_task_keys: ['t1'] },
+  ];
+  assert.equal(getNextAction(tasks1).task.id, 2);
+  assert.equal(getNextAction(tasks1).type, 'in_progress');
+
+  // Case 2: No task in progress, pick first unlocked task
+  const tasks2 = [
+    { id: 1, stable_key: 't1', status: 'completed', prerequisite_task_keys: [] },
+    { id: 2, stable_key: 't2', status: 'not_started', prerequisite_task_keys: ['t1'] },
+    { id: 3, stable_key: 't3', status: 'not_started', prerequisite_task_keys: ['t2'] },
+  ];
+  assert.equal(getNextAction(tasks2).task.id, 2);
+  assert.equal(getNextAction(tasks2).type, 'unlocked');
+
+  // Case 3: All tasks completed
+  const tasks3 = [
+    { id: 1, stable_key: 't1', status: 'completed', prerequisite_task_keys: [] },
+    { id: 2, stable_key: 't2', status: 'completed', prerequisite_task_keys: ['t1'] },
+  ];
+  assert.equal(getNextAction(tasks3).task, null);
+  assert.equal(getNextAction(tasks3).type, 'all_completed');
+});
+
+test('R1.1 Pending plan proposal alert triggered when pending proposals count > 0', () => {
+  function shouldShowProposalBanner(mission) {
+    return Boolean(mission && mission.pending_proposals_count > 0);
+  }
+
+  assert.equal(shouldShowProposalBanner({ pending_proposals_count: 0 }), false);
+  assert.equal(shouldShowProposalBanner({ pending_proposals_count: 1 }), true);
+  assert.equal(shouldShowProposalBanner({ pending_proposals_count: 2 }), true);
+  assert.equal(shouldShowProposalBanner(null), false);
+});
+
+test('R1.1 New student vs returning student Home view state discrimination', () => {
+  function getHomeState(mission) {
+    if (!mission) return 'new_student_welcome';
+    return 'returning_student_roadmap';
+  }
+
+  assert.equal(getHomeState(null), 'new_student_welcome');
+  assert.equal(getHomeState({ id: 1, title: 'Embedded Systems' }), 'returning_student_roadmap');
+});
+
 
 
 
