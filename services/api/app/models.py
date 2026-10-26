@@ -505,3 +505,23 @@ class AgentRun(Base):
     proposal = relationship("MissionChangeProposal")
 
 
+class MissionIdempotencyRecord(Base):
+    """Tracks mission creation idempotency keys and request fingerprints."""
+    __tablename__ = "mission_idempotency_records"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    idempotency_key = Column(String(128), unique=True, nullable=False, index=True)
+    student_id = Column(
+        Integer, ForeignKey("students.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    payload_fingerprint = Column(String(64), nullable=False)
+    mission_id = Column(
+        Integer, ForeignKey("career_missions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at = Column(DateTime, default=get_naive_utc_now, nullable=False)
+
+    student = relationship("Student")
+    mission = relationship("CareerMission")
+
+
+

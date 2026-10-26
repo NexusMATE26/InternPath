@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CareerMission } from './CareerMissionView';
 import { RoleItem, RoleRequirementItem } from './CareersView';
 
@@ -49,6 +49,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
   // Step 5: Success Result
   const [createdMission, setCreatedMission] = useState<CareerMission | null>(null);
+  const attemptIdemKeyRef = useRef<string | null>(null);
 
   // 1. Fetch available roles on mount
   useEffect(() => {
@@ -187,44 +188,33 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         throw new Error(body?.detail ?? `Failed to update profile (HTTP ${profileRes.status})`);
       }
 
-      // Phase B: Invoke C++20 LearningPathEngine and create persistent Career Mission
+      // Phase B: Invoke C++20 LearningPathEngine and create persistent Career Mission with Idempotency Key
       setSubmissionPhase("Invoking C++20 LearningPathEngine (Kahn's topological sort & prerequisite closure)...");
+      if (!attemptIdemKeyRef.current || allowReplace) {
+        attemptIdemKeyRef.current = `onboard-${selectedRoleId}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+      }
+      const currentIdemKey = attemptIdemKeyRef.current;
+
       const missionRes = await fetch('/v1/missions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': currentIdemKey,
+        },
         body: JSON.stringify({
           target_role_id: selectedRoleId,
           weekly_hours: weeklyHours,
           allow_replace_active: allowReplace,
+          idempotency_key: currentIdemKey,
         }),
       });
 
       if (missionRes.status === 409) {
-        // Active mission conflict: check if the student already has an active mission
+        // Active mission conflict: an active mission already exists and requires explicit student confirmation
         try {
           const activeCheck = await fetch('/v1/missions/active');
           if (activeCheck.ok) {
             const activeData: CareerMission = await activeCheck.json();
-            // Check if this is a genuine in-flight retry of the exact same submission:
-            // Must have: identical role, identical weekly hours, 0 completed tasks, 0 in progress,
-            // no pending proposals, and created within the last 30 seconds of this submission.
-            const createdMs = activeData.created_at ? new Date(activeData.created_at).getTime() : 0;
-            const isImmediateInFlightRetry =
-              activeData.target_role_id === selectedRoleId &&
-              activeData.weekly_hours === weeklyHours &&
-              activeData.completed_tasks === 0 &&
-              activeData.in_progress_tasks === 0 &&
-              activeData.pending_proposals_count === 0 &&
-              Math.abs(Date.now() - createdMs) < 30_000;
-
-            if (isImmediateInFlightRetry) {
-              setCreatedMission(activeData);
-              setStep(5);
-              return;
-            }
-
-            // Otherwise, it is an existing active mission (e.g. from an earlier session, different hours, or with completed tasks).
-            // Do NOT falsely treat it as a newly generated mission.
             setConflictingMission(activeData);
           }
         } catch {
@@ -244,6 +234,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
       setSubmissionPhase('Structuring initial milestones and registered tasks...');
       const created: CareerMission = await missionRes.json();
+      attemptIdemKeyRef.current = null; // Clear key on completed creation
       setCreatedMission(created);
       setStep(5); // Advance to Success Screen
     } catch (err) {

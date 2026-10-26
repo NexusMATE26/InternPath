@@ -365,6 +365,12 @@ export default function App() {
               availableRoles={roles}
               evidenceList={evidenceList}
               onStartOnboarding={handleStartOnboarding}
+              onMissionUpdated={(m) => {
+                setActiveMission(m);
+              }}
+              onDataRefresh={() => {
+                loadInitialData();
+              }}
             />
           )}
 

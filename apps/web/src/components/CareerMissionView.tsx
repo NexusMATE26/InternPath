@@ -127,13 +127,18 @@ interface CareerMissionViewProps {
   evidenceList: EvidenceItem[];
   onEvidenceCreated?: () => void;
   onStartOnboarding?: () => void;
+  onMissionUpdated?: (mission: CareerMission | null) => void;
+  onDataRefresh?: () => void;
 }
 
 export default function CareerMissionView({
   onNavigateToPlanner,
   availableRoles,
   evidenceList,
+  onEvidenceCreated,
   onStartOnboarding,
+  onMissionUpdated,
+  onDataRefresh,
 }: CareerMissionViewProps) {
   const [mission, setMission] = useState<CareerMission | null>(null);
   const [loading, setLoading] = useState(true);
@@ -244,6 +249,7 @@ export default function CareerMissionView({
       const res = await fetch('/v1/missions/active');
       if (res.status === 404) {
         setMission(null);
+        onMissionUpdated?.(null);
         return;
       }
       if (!res.ok) {
@@ -252,6 +258,7 @@ export default function CareerMissionView({
       }
       const data: CareerMission = await res.json();
       setMission(data);
+      onMissionUpdated?.(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch mission');
     } finally {
@@ -335,6 +342,7 @@ export default function CareerMissionView({
 
       notifySuccess(`Task "${task.skill_name}" marked as ${newStatus.replace('_', ' ')}.`);
       fetchActiveMission();
+      onDataRefresh?.();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to update task status');
     }
@@ -390,6 +398,8 @@ export default function CareerMissionView({
       notifySuccess(`Evidence attached to "${linkEvidenceTask.skill_name}".`);
       setLinkEvidenceTask(null);
       fetchActiveMission();
+      onEvidenceCreated?.();
+      onDataRefresh?.();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to link evidence');
     } finally {
@@ -450,6 +460,7 @@ export default function CareerMissionView({
       notifySuccess('Mission version updated successfully! Completed milestones preserved.');
       fetchActiveMission();
       fetchProposals(mission.id);
+      onDataRefresh?.();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to approve proposal');
     }
@@ -472,6 +483,7 @@ export default function CareerMissionView({
       notifySuccess('Proposal rejected. Active mission remains unchanged.');
       fetchProposals(mission.id);
       fetchActiveMission();
+      onDataRefresh?.();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to reject proposal');
     }

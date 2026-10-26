@@ -1,9 +1,10 @@
 from typing import Optional, Any
 import json
-from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi import FastAPI, HTTPException, status, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from .database import get_db
 from . import crud, models
@@ -375,12 +376,13 @@ def generate_learning_path(
 @app.post("/v1/missions", response_model=CareerMissionResponse, status_code=status.HTTP_201_CREATED)
 def create_mission(
     payload: MissionCreateRequest,
+    idempotency_key_header: Optional[str] = Header(None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
 ):
-    """Generate and persist a new Career Mission with immutable Version 1.0."""
+    """Generate and persist a new Career Mission with immutable Version 1.0 (with idempotency protection)."""
     dev_student = crud.get_or_create_dev_student(db)
 
-    # Resolve target role
+    # Resolve target role and parameters
     target_role_id = payload.target_role_id or dev_student.target_role_id or "distributed-systems-intern"
     role = crud.get_role_by_id(db, target_role_id)
     if not role:
@@ -388,6 +390,38 @@ def create_mission(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Target role '{target_role_id}' not found in catalogue.",
         )
+
+    hours = payload.weekly_hours or dev_student.weekly_hours or 10
+    idem_key = payload.idempotency_key or idempotency_key_header
+
+    # Compute canonical fingerprint for this request
+    fingerprint = crud.compute_mission_payload_fingerprint(
+        student_id=dev_student.id,
+        target_role_id=target_role_id,
+        weekly_hours=hours,
+        title=payload.title,
+        allow_replace=payload.allow_replace_active,
+    )
+
+    # 1. Idempotency Check: if key exists, verify fingerprint
+    if idem_key:
+        existing_record = crud.get_mission_idempotency_record(db, idem_key)
+        if existing_record:
+            if existing_record.payload_fingerprint == fingerprint:
+                # Same key and same payload: return original mission without creating duplicate
+                existing_mission = crud.get_career_mission_by_id(db, existing_record.mission_id, dev_student.id)
+                if existing_mission:
+                    mission_dict = crud.format_career_mission_dict(existing_mission)
+                    return CareerMissionResponse(**mission_dict)
+            else:
+                # Same key with different payload: reject with HTTP 409
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Idempotency conflict: Key '{idem_key}' was already processed with a different payload. "
+                        "Reusing an idempotency key with modified parameters is not permitted."
+                    ),
+                )
 
     # Collect student skills
     profile = crud.get_student_profile(db, dev_student.id)
@@ -429,11 +463,26 @@ def create_mission(
             plan_data=plan_data,
             target_role_id=target_role_id,
             title=payload.title,
-            weekly_hours=payload.weekly_hours,
+            weekly_hours=hours,
             allow_replace_active=payload.allow_replace_active,
+            idempotency_key=idem_key,
+            payload_fingerprint=fingerprint,
         )
         mission_dict = crud.format_career_mission_dict(mission)
         return CareerMissionResponse(**mission_dict)
+    except IntegrityError as exc:
+        db.rollback()
+        if idem_key:
+            existing_record = crud.get_mission_idempotency_record(db, idem_key)
+            if existing_record and existing_record.payload_fingerprint == fingerprint:
+                existing_mission = crud.get_career_mission_by_id(db, existing_record.mission_id, dev_student.id)
+                if existing_mission:
+                    mission_dict = crud.format_career_mission_dict(existing_mission)
+                    return CareerMissionResponse(**mission_dict)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Conflict occurred during concurrent mission creation.",
+        ) from exc
     except ValueError as exc:
         msg = str(exc)
         if "already exists" in msg:

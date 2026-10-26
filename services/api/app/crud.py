@@ -9,6 +9,7 @@ from typing import Optional, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import select, delete
 
+import hashlib
 from app.agent.clock import get_naive_utc_now, get_utc_now
 
 from .models import (
@@ -24,6 +25,7 @@ from .models import (
     MissionTask,
     TaskProgressEvent,
     MissionChangeProposal,
+    MissionIdempotencyRecord,
 )
 
 DEV_STUDENT_EMAIL = "alex.dev@internpath.local"
@@ -609,6 +611,59 @@ def format_career_mission_dict(mission: CareerMission) -> dict[str, Any]:
     }
 
 
+def compute_mission_payload_fingerprint(
+    student_id: int,
+    target_role_id: Optional[str],
+    weekly_hours: int,
+    title: Optional[str] = None,
+    allow_replace: bool = False,
+) -> str:
+    """Compute deterministic SHA-256 fingerprint for canonical mission creation payload."""
+    payload_dict = {
+        "allow_replace": bool(allow_replace),
+        "student_id": int(student_id),
+        "target_role_id": str(target_role_id or ""),
+        "title": str(title or ""),
+        "weekly_hours": int(weekly_hours),
+    }
+    canonical_json = json.dumps(payload_dict, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def get_mission_idempotency_record(
+    db: Session,
+    idempotency_key: str,
+) -> Optional[MissionIdempotencyRecord]:
+    """Retrieve idempotency tracking record by key."""
+    if not idempotency_key:
+        return None
+    return (
+        db.query(MissionIdempotencyRecord)
+        .filter(MissionIdempotencyRecord.idempotency_key == idempotency_key)
+        .first()
+    )
+
+
+def record_mission_idempotency(
+    db: Session,
+    idempotency_key: str,
+    student_id: int,
+    payload_fingerprint: str,
+    mission_id: int,
+) -> MissionIdempotencyRecord:
+    """Record successful mission creation idempotency entry."""
+    rec = MissionIdempotencyRecord(
+        idempotency_key=idempotency_key,
+        student_id=student_id,
+        payload_fingerprint=payload_fingerprint,
+        mission_id=mission_id,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return rec
+
+
 def create_career_mission_from_plan(
     db: Session,
     student_id: int,
@@ -617,6 +672,8 @@ def create_career_mission_from_plan(
     title: Optional[str] = None,
     weekly_hours: Optional[int] = None,
     allow_replace_active: bool = False,
+    idempotency_key: Optional[str] = None,
+    payload_fingerprint: Optional[str] = None,
 ) -> CareerMission:
     """Create a persistent Career Mission, its immutable initial Version 1, and ordered tasks."""
     student = db.query(Student).filter(Student.id == student_id).first()
@@ -644,15 +701,23 @@ def create_career_mission_from_plan(
         .first()
     )
 
-    if existing_active and not allow_replace_active:
-        if existing_active.target_role_id == target_role_id:
-            raise ValueError(
-                f"An active Career Mission already exists for '{role_title}'. "
-                f"Please view your existing active mission or propose a plan revision."
+    if existing_active:
+        if idempotency_key:
+            idem_rec = (
+                db.query(MissionIdempotencyRecord)
+                .filter(MissionIdempotencyRecord.idempotency_key == idempotency_key)
+                .first()
             )
-        else:
-            # Archive previous active mission if student initiates a new target role mission
+            if idem_rec and idem_rec.mission_id == existing_active.id:
+                if idem_rec.payload_fingerprint == payload_fingerprint:
+                    return existing_active
+        if allow_replace_active:
             existing_active.status = "archived"
+        else:
+            raise ValueError(
+                f"An active Career Mission already exists ({existing_active.title}). "
+                "Explicit confirmation is required to archive it and create a new mission."
+            )
 
     hours = weekly_hours or student.weekly_hours or 10
     mission_title = title or f"Career Mission: {role_title}"
@@ -759,6 +824,15 @@ def create_career_mission_from_plan(
                 actor="system_planner",
             )
             db.add(init_event)
+
+    if idempotency_key and payload_fingerprint:
+        idem_rec = MissionIdempotencyRecord(
+            idempotency_key=idempotency_key,
+            student_id=student_id,
+            payload_fingerprint=payload_fingerprint,
+            mission_id=mission.id,
+        )
+        db.add(idem_rec)
 
     db.commit()
     db.refresh(mission)

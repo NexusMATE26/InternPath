@@ -355,6 +355,8 @@ class MissionCreateRequest(BaseModel):
     title: Optional[str] = None
     weekly_hours: Optional[int] = Field(default=None, ge=1, le=80)
     allow_replace_active: bool = False
+    idempotency_key: Optional[str] = Field(default=None, max_length=128)
+
 
 
 class TaskStatusUpdateRequest(BaseModel):

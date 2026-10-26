@@ -35,6 +35,7 @@ from app.models import (
     TaskProgressEvent,
     MissionChangeProposal,
     EvidenceItem,
+    MissionIdempotencyRecord,
 )
 
 client = TestClient(app)
@@ -44,11 +45,12 @@ client = TestClient(app)
 def clean_mission_state():
     """Ensure clean mission state before each test."""
     with SessionLocal() as db:
-        # Delete task events, tasks, proposals, versions, missions
+        # Delete task events, tasks, proposals, versions, idempotency records, missions
         db.query(TaskProgressEvent).delete()
         db.query(MissionTask).delete()
         db.query(MissionChangeProposal).delete()
         db.query(MissionVersion).delete()
+        db.query(MissionIdempotencyRecord).delete()
         db.query(CareerMission).delete()
         db.commit()
     yield
@@ -526,3 +528,267 @@ def test_invalid_ids_return_404():
     assert client.post("/v1/missions/99999/tasks/1/evidence", json={"evidence_id": 1}).status_code == 404
     assert client.get("/v1/missions/99999/proposals").status_code == 404
     assert client.post("/v1/missions/99999/proposals/1/approve").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint B: Mission Creation Idempotency & Conflict Tests
+# ---------------------------------------------------------------------------
+
+def test_mission_creation_idempotency_same_key_same_payload():
+    """Retrying the exact same idempotency key and payload returns the original mission."""
+    key = "idem-test-key-alpha-1"
+    payload = {
+        "target_role_id": "distributed-systems-intern",
+        "weekly_hours": 15,
+        "idempotency_key": key,
+    }
+
+    # Initial submission
+    res1 = client.post("/v1/missions", json=payload)
+    assert res1.status_code == 201
+    mission1 = res1.json()
+    assert mission1["id"] > 0
+    assert mission1["target_role_id"] == "distributed-systems-intern"
+
+    # Retry submission with same key & same payload
+    res2 = client.post("/v1/missions", json=payload)
+    assert res2.status_code == 201
+    mission2 = res2.json()
+
+    # Must return identical mission without duplicate creation
+    assert mission2["id"] == mission1["id"]
+    assert mission2["title"] == mission1["title"]
+    assert mission2["weekly_hours"] == mission1["weekly_hours"]
+
+    # Verify database contains only 1 active mission
+    missions_list = client.get("/v1/missions").json()
+    assert len(missions_list) == 1
+    assert missions_list[0]["id"] == mission1["id"]
+
+
+def test_mission_creation_idempotency_header_support():
+    """Idempotency-Key HTTP header works identically to request body property."""
+    key = "idem-header-key-beta-2"
+    headers = {"Idempotency-Key": key}
+    payload = {
+        "target_role_id": "backend-api-intern",
+        "weekly_hours": 12,
+    }
+
+    res1 = client.post("/v1/missions", json=payload, headers=headers)
+    assert res1.status_code == 201
+    m1 = res1.json()
+
+    res2 = client.post("/v1/missions", json=payload, headers=headers)
+    assert res2.status_code == 201
+    m2 = res2.json()
+    assert m2["id"] == m1["id"]
+
+
+def test_mission_creation_idempotency_same_key_different_payload_conflict():
+    """Reusing the SAME idempotency key with a DIFFERENT payload produces HTTP 409 Conflict."""
+    key = "idem-conflict-key-gamma-3"
+    payload1 = {
+        "target_role_id": "distributed-systems-intern",
+        "weekly_hours": 15,
+        "idempotency_key": key,
+    }
+    res1 = client.post("/v1/missions", json=payload1)
+    assert res1.status_code == 201
+
+    # Reusing same key with different weekly_hours
+    payload2 = {
+        "target_role_id": "distributed-systems-intern",
+        "weekly_hours": 20,
+        "idempotency_key": key,
+    }
+    res2 = client.post("/v1/missions", json=payload2)
+    assert res2.status_code == 409
+    err = res2.json()["detail"]
+    assert "Idempotency conflict" in err
+    assert "different payload" in err
+
+
+def test_mission_creation_different_key_same_role_active_protection():
+    """A DIFFERENT key does NOT silently adopt a previous active mission; it returns 409 Active Mission conflict."""
+    key1 = "idem-key-orig-4"
+    res1 = client.post(
+        "/v1/missions",
+        json={
+            "target_role_id": "distributed-systems-intern",
+            "weekly_hours": 15,
+            "idempotency_key": key1,
+        },
+    )
+    assert res1.status_code == 201
+    m1 = res1.json()
+
+    # Submission with a DIFFERENT key for the same role without allow_replace_active
+    key2 = "idem-key-different-5"
+    res2 = client.post(
+        "/v1/missions",
+        json={
+            "target_role_id": "distributed-systems-intern",
+            "weekly_hours": 15,
+            "idempotency_key": key2,
+            "allow_replace_active": False,
+        },
+    )
+    # Must reject with 409 to protect active mission
+    assert res2.status_code == 409
+    assert "already exists" in res2.json()["detail"]
+
+
+def test_mission_creation_explicit_replace_with_idempotency():
+    """Explicit replace (allow_replace_active=True) archives previous active mission and creates new mission."""
+    key1 = "idem-replace-old-6"
+    res1 = client.post(
+        "/v1/missions",
+        json={
+            "target_role_id": "distributed-systems-intern",
+            "weekly_hours": 15,
+            "idempotency_key": key1,
+        },
+    )
+    assert res1.status_code == 201
+    m1 = res1.json()
+
+    key2 = "idem-replace-new-7"
+    res2 = client.post(
+        "/v1/missions",
+        json={
+            "target_role_id": "backend-api-intern",
+            "weekly_hours": 20,
+            "allow_replace_active": True,
+            "idempotency_key": key2,
+        },
+    )
+    assert res2.status_code == 201
+    m2 = res2.json()
+    assert m2["id"] != m1["id"]
+    assert m2["target_role_id"] == "backend-api-intern"
+
+    # Verify previous mission is now archived and new one is active
+    active = client.get("/v1/missions/active").json()
+    assert active["id"] == m2["id"]
+
+    all_missions = client.get("/v1/missions").json()
+    old_mission = next(m for m in all_missions if m["id"] == m1["id"])
+    assert old_mission["status"] == "archived"
+
+
+def test_mission_creation_preserves_completed_tasks_on_idempotent_replay():
+    """Idempotent replay returns current active mission state including progressed tasks without resetting them."""
+    key = "idem-replay-progress-8"
+    res1 = client.post(
+        "/v1/missions",
+        json={
+            "target_role_id": "backend-api-intern",
+            "weekly_hours": 15,
+            "idempotency_key": key,
+        },
+    )
+    assert res1.status_code == 201
+    m1 = res1.json()
+    first_task = m1["active_version"]["stages"][0]["tasks"][0]
+
+    # Progress first task
+    patch_res = client.patch(
+        f"/v1/missions/{m1['id']}/tasks/{first_task['id']}/status",
+        json={"status": "in_progress"},
+    )
+    assert patch_res.status_code == 200
+
+    # Idempotent replay of the creation request
+    replay_res = client.post(
+        "/v1/missions",
+        json={
+            "target_role_id": "backend-api-intern",
+            "weekly_hours": 15,
+            "idempotency_key": key,
+        },
+    )
+    assert replay_res.status_code == 201
+    replayed = replay_res.json()
+    assert replayed["id"] == m1["id"]
+    # Task progress must be preserved
+    replayed_task = replayed["active_version"]["stages"][0]["tasks"][0]
+    assert replayed_task["id"] == first_task["id"]
+    assert replayed_task["status"] == "in_progress"
+
+
+def test_concurrent_duplicate_mission_creation():
+    """Concurrent requests with the exact same idempotency key return the same mission without duplicate creation."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    key = "idem-concurrent-race-key-99"
+    payload = {
+        "target_role_id": "backend-api-intern",
+        "weekly_hours": 15,
+        "idempotency_key": key,
+    }
+
+    def post_mission():
+        # Each thread gets its own independent client call
+        return client.post("/v1/missions", json=payload)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(post_mission) for _ in range(5)]
+        results = [f.result() for f in futures]
+
+    # Every concurrent request must receive HTTP 201
+    for res in results:
+        assert res.status_code == 201
+
+    # All responses must return the exact same mission ID
+    mission_ids = [res.json()["id"] for res in results]
+    assert len(set(mission_ids)) == 1
+
+    # Exactly one active mission in the database
+    missions = client.get("/v1/missions").json()
+    assert len(missions) == 1
+    assert missions[0]["id"] == mission_ids[0]
+
+
+def test_network_timeout_and_retry_reconciliation():
+    """Client timeout / disconnect before receiving response reconciles cleanly on subsequent retry."""
+    key = "idem-timeout-retry-key-77"
+    payload = {
+        "target_role_id": "distributed-systems-intern",
+        "weekly_hours": 12,
+        "idempotency_key": key,
+    }
+
+    # Initial attempt succeeds on backend
+    res1 = client.post("/v1/missions", json=payload)
+    assert res1.status_code == 201
+    created_mission = res1.json()
+
+    # Client simulates receiving a network timeout, so it retries with the same idempotency key:
+    res_retry = client.post("/v1/missions", json=payload)
+    assert res_retry.status_code == 201
+    retry_mission = res_retry.json()
+
+    # Reconciled mission identity matches exactly
+    assert retry_mission["id"] == created_mission["id"]
+    assert retry_mission["title"] == created_mission["title"]
+
+
+def test_mission_creation_failure_rollback():
+    """Failure during mission creation (e.g. invalid target role) rolls back transaction without orphan records."""
+    key = "idem-failure-key-55"
+    payload = {
+        "target_role_id": "nonexistent-fake-role-xyz",
+        "weekly_hours": 10,
+        "idempotency_key": key,
+    }
+
+    res = client.post("/v1/missions", json=payload)
+    assert res.status_code == 404
+    assert "not found" in res.json()["detail"].lower()
+
+    # Verify no mission record was created
+    missions = client.get("/v1/missions").json()
+    assert len(missions) == 0
+
+
