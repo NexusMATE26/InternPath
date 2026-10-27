@@ -135,7 +135,8 @@ class GeminiProvider(BaseLLMProvider):
                 "description": td.description,
                 "parameters": td.parameters,
             })
-        return [{"function_declarations": declarations}]
+        # Support both snake_case and camelCase keys for official Gemini REST compatibility
+        return [{"function_declarations": declarations, "functionDeclarations": declarations}]
 
     def generate_turn(
         self,
@@ -179,6 +180,15 @@ class GeminiProvider(BaseLLMProvider):
                         return ModelTurnResponse(content="", tool_calls=[], raw_response=resp_data)
 
                     first_candidate = candidates[0]
+                    finish_reason = first_candidate.get("finishReason")
+                    if finish_reason in ("SAFETY", "RECITATION", "BLOCKLIST"):
+                        logger.warning("Gemini candidate blocked by safety filter: %s", finish_reason)
+                        return ModelTurnResponse(
+                            content=f"[Provider Notice] Generation blocked by provider safety policy: {finish_reason}",
+                            tool_calls=[],
+                            raw_response=resp_data,
+                        )
+
                     content_obj = first_candidate.get("content", {})
                     parts = content_obj.get("parts", [])
 
@@ -213,8 +223,14 @@ class GeminiProvider(BaseLLMProvider):
                         raw_response=resp_data,
                     )
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-                last_error = exc
-                logger.warning("Gemini API call attempt %d failed: %s", attempt + 1, exc)
+                err_detail = ""
+                if isinstance(exc, urllib.error.HTTPError):
+                    try:
+                        err_detail = f": {exc.read().decode('utf-8')}"
+                    except Exception:
+                        pass
+                last_error = f"{exc}{err_detail}"
+                logger.warning("Gemini API call attempt %d failed: %s", attempt + 1, last_error)
                 if attempt < self.max_retries:
                     time.sleep(0.5 * (attempt + 1))
 
@@ -333,6 +349,13 @@ class OpenAIProvider(BaseLLMProvider):
                         return ModelTurnResponse(content="", tool_calls=[], raw_response=resp_data)
 
                     msg = choices[0].get("message", {})
+                    if msg.get("refusal"):
+                        return ModelTurnResponse(
+                            content=f"[Provider Notice] Generation refused by provider: {msg.get('refusal')}",
+                            tool_calls=[],
+                            raw_response=resp_data,
+                        )
+
                     tool_calls: list[ToolCall] = []
 
                     raw_tc = msg.get("tool_calls", [])
@@ -365,8 +388,14 @@ class OpenAIProvider(BaseLLMProvider):
                         raw_response=resp_data,
                     )
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-                last_error = exc
-                logger.warning("OpenAI API call attempt %d failed: %s", attempt + 1, exc)
+                err_detail = ""
+                if isinstance(exc, urllib.error.HTTPError):
+                    try:
+                        err_detail = f": {exc.read().decode('utf-8')}"
+                    except Exception:
+                        pass
+                last_error = f"{exc}{err_detail}"
+                logger.warning("OpenAI API call attempt %d failed: %s", attempt + 1, last_error)
                 if attempt < self.max_retries:
                     time.sleep(0.5 * (attempt + 1))
 

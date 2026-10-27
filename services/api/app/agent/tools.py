@@ -68,6 +68,7 @@ class AgentToolRegistry:
         self.db = db
         self.context_student_id = context_student_id
         self.invocations: list[ToolExecutionRecord] = []
+        self.simulation_cache: dict[str, dict[str, Any]] = {}
         self._registry: dict[str, Callable[..., Any]] = {}
         self._register_authorized_tools()
 
@@ -469,21 +470,102 @@ class AgentToolRegistry:
         mission_id: int,
         proposal_title: str,
         rationale: str,
-        proposed_plan: dict[str, Any],
+        proposed_plan: Optional[dict[str, Any]] = None,
+        simulation_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Stage a pending mission change proposal.
 
         CRITICAL SAFETY BOUNDARY:
-        This tool creates a proposal in 'pending' status for human student review.
-        It NEVER automatically approves the proposal or mutates the active mission version.
+        1. This tool creates a proposal in 'pending' status for human student review.
+        2. It NEVER automatically approves the proposal or mutates the active mission version.
+        3. Model arguments alone cannot authorize arbitrary plan snapshots.
+           The proposal MUST be backed by an executed, valid simulation or deterministically
+           validated against completed work preservation and mandatory role requirements.
         """
+        # 1. Enforce student tenant boundary
+        mission = crud.get_career_mission_by_id(self.db, mission_id, self.context_student_id)
+        if not mission:
+            raise ToolPermissionError(f"Access denied: Mission {mission_id} does not belong to active student {self.context_student_id}.")
+
+        active_v = mission.active_version
+        if not active_v:
+            raise ToolPermissionError("Cannot stage proposal: Mission has no active version.")
+
+        plan_to_stage: Optional[dict[str, Any]] = None
+
+        # 2. Case A: Staged via executed simulation ID
+        if simulation_id:
+            if simulation_id not in self.simulation_cache:
+                raise ToolPermissionError(
+                    f"Proposal rejected: simulation_id '{simulation_id}' is invalid or was not executed by this agent session."
+                )
+            sim_data = self.simulation_cache[simulation_id]
+            if sim_data.get("mission_id") != mission.id:
+                raise ToolPermissionError(
+                    f"Proposal rejected: simulation '{simulation_id}' was generated for mission {sim_data.get('mission_id')}, not {mission.id}."
+                )
+            if sim_data.get("validity_status") == ValidityStatus.INVALID.value:
+                raise ToolPermissionError(
+                    f"Proposal rejected: cannot stage proposal from simulation '{simulation_id}' because C++ planner evaluated it as INVALID."
+                )
+            plan_to_stage = sim_data.get("proposed_plan_snapshot")
+            if not plan_to_stage:
+                raise ValueError(f"Simulation '{simulation_id}' does not contain a proposed plan snapshot.")
+
+        # 3. Case B: Proposed plan dict provided directly
+        elif proposed_plan:
+            # Deterministic plan snapshot validation
+            # A) Completed task preservation: All tasks with status 'completed' in active_v MUST exist in proposed_plan
+            active_completed_tasks = [t for t in active_v.tasks if t.status == "completed"]
+            proposed_skill_levels: dict[int, int] = {}
+            for stage in proposed_plan.get("stages", []):
+                for sk in stage.get("skills", []):
+                    sid = sk.get("skill_id")
+                    lvl = sk.get("target_level", 0)
+                    if sid is not None:
+                        proposed_skill_levels[sid] = max(proposed_skill_levels.get(sid, 0), lvl)
+
+            if active_completed_tasks:
+                for ct in active_completed_tasks:
+                    if ct.skill_id not in proposed_skill_levels or proposed_skill_levels[ct.skill_id] < ct.target_level:
+                        raise ToolPermissionError(
+                            f"Proposal rejected: Proposed plan violates completed work preservation invariant. "
+                            f"Completed milestone '{ct.skill_name}' (target level {ct.target_level}) is omitted or degraded."
+                        )
+
+            # B) Mandatory requirement preservation
+            if mission.target_role_id and proposed_skill_levels:
+                role_reqs = crud.get_role_requirements(self.db, mission.target_role_id)
+                mandatory_reqs = [r for r in role_reqs if r.get("mandatory", True)]
+                if len(proposed_skill_levels) >= len(mandatory_reqs):
+                    for mr in mandatory_reqs:
+                        if mr["skill_id"] not in proposed_skill_levels:
+                            raise ToolPermissionError(
+                                f"Proposal rejected: Proposed plan omits mandatory core role competency (skill ID {mr['skill_id']})."
+                            )
+
+            plan_to_stage = proposed_plan
+
+        # 4. Case C: Neither supplied, fallback to latest valid executed simulation if available
+        else:
+            if self.simulation_cache:
+                valid_sims = [s for s in self.simulation_cache.values() if s.get("validity_status") != ValidityStatus.INVALID.value]
+                if valid_sims:
+                    plan_to_stage = valid_sims[-1].get("proposed_plan_snapshot")
+                else:
+                    raise ToolPermissionError("Cannot stage proposal: all executed simulations were evaluated as INVALID by C++ engine.")
+            else:
+                raise ToolPermissionError(
+                    "Cannot stage proposal: neither a valid simulation_id nor a validated proposed_plan was provided."
+                )
+
         proposal = crud.create_mission_change_proposal(
             db=self.db,
-            mission_id=mission_id,
+            mission_id=mission.id,
             student_id=self.context_student_id,
             proposal_title=proposal_title,
             rationale=rationale,
-            proposed_plan=proposed_plan,
+            proposed_plan=plan_to_stage,
             proposed_by="agent_planner",
         )
         return {
@@ -748,7 +830,7 @@ class AgentToolRegistry:
             f"Deferred {len(deferred_optional_ids)} elective(s). Completed work ({len(completed_active_tasks)} tasks) fully preserved."
         )
 
-        return {
+        res = {
             "simulation_id": sim_id,
             "mission_id": mission.id,
             "base_version_number": active_version.version_number,
@@ -772,6 +854,8 @@ class AgentToolRegistry:
             "engine_identity": "c++20_learning_path_engine",
             "trace_reference": plan_dict.get("algorithm_trace"),
         }
+        self.simulation_cache[sim_id] = res
+        return res
 
     # -----------------------------------------------------------------------
     # Authorized Computational Tool: Alternative Comparison (R2.1)
@@ -1108,16 +1192,17 @@ class AgentToolRegistry:
             ),
             ToolDefinition(
                 name="create_mission_change_proposal",
-                description="Stage a pending mission change proposal for human student review. NEVER auto-approves.",
+                description="Stage a pending mission change proposal for human student review. NEVER auto-approves. Must reference a valid simulation_id or provide a validated plan preserving completed work.",
                 parameters={
                     "type": "object",
                     "properties": {
                         "mission_id": {"type": "integer", "description": "Career Mission ID"},
                         "proposal_title": {"type": "string", "description": "Descriptive proposal title"},
                         "rationale": {"type": "string", "description": "Reasoning for the proposed plan adjustment"},
-                        "proposed_plan": {"type": "object", "description": "Complete staged plan dict"},
+                        "simulation_id": {"type": "string", "description": "Optional authoritative simulation ID from simulate_plan_variant"},
+                        "proposed_plan": {"type": "object", "description": "Optional complete staged plan dict (must preserve all completed tasks)"},
                     },
-                    "required": ["mission_id", "proposal_title", "rationale", "proposed_plan"],
+                    "required": ["mission_id", "proposal_title", "rationale"],
                 },
                 returns={"type": "object", "properties": {"proposal_id": {"type": "integer"}, "status": {"type": "string"}, "human_approval_required": {"type": "boolean"}}},
                 permission_tier="proposal_stage",

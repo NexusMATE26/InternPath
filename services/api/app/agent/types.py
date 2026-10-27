@@ -72,6 +72,8 @@ class AgentExecutionTrace(BaseModel):
     execution_time_ms: int = Field(default=0, description="Total elapsed time in milliseconds")
     fallback_used: bool = Field(default=False, description="True if fallback to deterministic rules occurred")
     fallback_reason: Optional[str] = Field(default=None, description="Explanation of why fallback was triggered")
+    grounding_status: str = Field(default="grounded", description="Grounding validation status: grounded, flagged_with_warnings, or rejected_unsupported")
+    grounding_violations: list[str] = Field(default_factory=list, description="List of grounding discrepancies detected, if any")
 
 
 class AgentQueryRequest(BaseModel):

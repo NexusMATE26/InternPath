@@ -170,7 +170,18 @@ class AgentService:
                 provider=self.llm_adapter.get_provider(),
                 max_turns=self.MAX_TOOL_ITERATIONS,
             )
-            trace = loop.execute(user_prompt, fallback_decision_generator=_deterministic_fallback)
+            trace = loop.execute(
+                user_prompt,
+                fallback_decision_generator=_deterministic_fallback,
+                active_mission=active_mission,
+                event_context={
+                    "event_id": agent_event.event_id,
+                    "event_type": agent_event.event_type,
+                    "source": agent_event.source,
+                    "source_reliability": agent_event.source_reliability,
+                    "is_simulated": agent_event.is_simulated,
+                },
+            )
 
             decision_category = trace.decision.decision_category
             explanation = trace.decision.explanation
@@ -183,6 +194,8 @@ class AgentService:
                 "event_type": agent_event.event_type,
                 "total_turns": len(trace.turns),
                 "fallback_used": trace.fallback_used,
+                "grounding_status": trace.grounding_status,
+                "grounding_violations": trace.grounding_violations,
             }
 
             if decision_category == "human_review_required":
@@ -281,13 +294,27 @@ class AgentService:
                 provider=self.llm_adapter.get_provider(),
                 max_turns=self.MAX_TOOL_ITERATIONS,
             )
-            trace = loop.execute(user_prompt)
+            trace = loop.execute(
+                user_prompt,
+                active_mission=active_m,
+                event_context={
+                    "event_type": "student_query",
+                    "source_reliability": "trusted_internal",
+                    "is_simulated": query_req.simulated,
+                },
+            )
             decision = trace.decision
             engine_used = trace.engine_used
             proposal_id = trace.proposal_id
             elapsed_ms = trace.execution_time_ms
             tools_invoked = trace.tools_invoked
             tool_io_log = trace.tool_io_log
+            query_evidence = {
+                "query": query_req.query,
+                "grounding_status": trace.grounding_status,
+                "grounding_violations": trace.grounding_violations,
+                "fallback_used": trace.fallback_used,
+            }
         else:
             # Deterministic fallback for student query
             if active_m:
@@ -335,7 +362,7 @@ class AgentService:
             engine_used=engine_used,
             decision_category=decision.decision_category,
             is_simulated=query_req.simulated,
-            relevant_evidence=json.dumps({"query": query_req.query}),
+            relevant_evidence=json.dumps(query_evidence if self.llm_adapter.is_llm_available() else {"query": query_req.query}),
             tools_invoked=json.dumps(tools_invoked),
             tool_io_log=json.dumps(tool_io_log),
             decision_explanation=decision.explanation,

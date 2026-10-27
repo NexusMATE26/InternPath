@@ -16,6 +16,7 @@ import re
 import time
 from typing import Any, Optional
 
+from app.agent.grounding import GroundingValidator
 from app.agent.providers import BaseLLMProvider
 from app.agent.tools import AgentToolRegistry, ToolPermissionError
 from app.agent.types import (
@@ -102,6 +103,8 @@ class AgentExecutionLoop:
         self,
         initial_user_prompt: str,
         fallback_decision_generator: Optional[Any] = None,
+        active_mission: Optional[Any] = None,
+        event_context: Optional[dict[str, Any]] = None,
     ) -> AgentExecutionTrace:
         """Run the bounded multi-turn agent loop to conclusion or safe fallback."""
         start_time = time.time()
@@ -274,6 +277,18 @@ class AgentExecutionLoop:
                 )
 
                 if decision:
+                    # Grounding validation: verify model claims against simulation and database facts
+                    grounding_res = GroundingValidator.validate_decision(
+                        decision=decision,
+                        tools_invoked=tools_invoked_names,
+                        tool_io_log=[rec.to_dict() for rec in self.registry.invocations],
+                        simulation_cache=self.registry.simulation_cache,
+                        active_mission=active_mission,
+                        event_context=event_context,
+                    )
+                    decision = grounding_res.validated_decision
+                    violations_str = [f"[{v.category}] {v.message}" for v in grounding_res.violations]
+
                     # Grounding validation: link staged proposal if created
                     if staged_proposal_id and decision.decision_category == "proposed_mission_adjustment":
                         if not decision.suggested_proposal_title:
@@ -291,6 +306,8 @@ class AgentExecutionLoop:
                         total_tokens=total_tokens_count,
                         execution_time_ms=total_elapsed,
                         fallback_used=False,
+                        grounding_status=grounding_res.status,
+                        grounding_violations=violations_str,
                     )
                 else:
                     logger.warning("Model produced non-JSON text on turn %d: %s", turn_idx, turn_resp.content)
@@ -364,4 +381,6 @@ class AgentExecutionLoop:
             execution_time_ms=total_elapsed,
             fallback_used=True,
             fallback_reason=reason,
+            grounding_status="deterministic_verified",
+            grounding_violations=[],
         )
