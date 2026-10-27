@@ -403,7 +403,7 @@ class ProposalDecisionRequest(BaseModel):
 class AgentEventCreateRequest(BaseModel):
     event_id: Optional[str] = None
     event_type: str = Field(
-        pattern="^(internship_deadline_changed|student_skill_evidence_added|mission_progress_updated)$",
+        pattern="^(internship_deadline_changed|student_skill_evidence_added|mission_progress_updated|student_query)$",
         description="Type of observed career environment event",
     )
     source: str = Field(min_length=2, max_length=100)
@@ -419,6 +419,22 @@ class AgentEventCreateRequest(BaseModel):
     evidence_reference: Optional[str] = None
     is_simulated: bool = False
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentQueryRequest(BaseModel):
+    query: str = Field(
+        min_length=3,
+        max_length=1000,
+        description="Student question, constraint change, or scenario description",
+    )
+    context_role_id: Optional[str] = Field(
+        default=None,
+        description="Optional explicit role ID context (defaults to student active mission target role)",
+    )
+    simulated: bool = Field(
+        default=False,
+        description="Whether this query is triggered in presentation / simulation mode",
+    )
 
 
 class AgentEventResponse(BaseModel):

@@ -53,6 +53,7 @@ from .schemas import (
     CheckPrerequisiteSafetyRequest,
     CheckPrerequisiteSafetyResponse,
     ToolDefinition,
+    AgentQueryRequest,
 )
 from .agent.tools import AgentToolRegistry, ToolPermissionError
 
@@ -905,6 +906,24 @@ def ingest_agent_event(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Agent workflow execution error: {exc}",
+        ) from exc
+
+
+@app.post("/v1/agent/query", response_model=AgentRunResponse, status_code=status.HTTP_200_OK)
+def query_agent_guidance(
+    payload: AgentQueryRequest,
+    db: Session = Depends(get_db),
+):
+    """Ask conversational guidance or explore scenario constraints via autonomous agent tool loop."""
+    dev_student = crud.get_or_create_dev_student(db)
+    agent_svc = AgentService(db, dev_student.id)
+    try:
+        run = agent_svc.process_query(payload)
+        return AgentRunResponse(**format_agent_run_dict(run))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Agent query execution error: {exc}",
         ) from exc
 
 

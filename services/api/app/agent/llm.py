@@ -106,6 +106,29 @@ class LLMAdapter:
             return "mock_llm"
         return "deterministic_rules"
 
+    def get_provider(self):
+        """Return multi-turn BaseLLMProvider instance for R2.2 agent loop."""
+        from app.agent.providers import GeminiProvider, OpenAIProvider, MockProvider
+
+        if self.provider == "gemini":
+            return GeminiProvider(
+                api_key=self.gemini_key,
+                model_name=self.model,
+                timeout_seconds=self.timeout_seconds,
+                max_retries=self.max_retries,
+            )
+        elif self.provider == "openai":
+            return OpenAIProvider(
+                api_key=self.openai_key,
+                model_name=self.model,
+                timeout_seconds=self.timeout_seconds,
+                max_retries=self.max_retries,
+            )
+        elif self.provider == "mock":
+            return MockProvider(model_name=self.model)
+        else:
+            return MockProvider(model_name="deterministic_rules")
+
     def synthesize_decision(
         self,
         event_summary: dict[str, Any],
