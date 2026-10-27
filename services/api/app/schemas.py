@@ -482,4 +482,144 @@ class AgentRunResponse(BaseModel):
     created_at: str
 
 
+# ---------------------------------------------------------
+# Phase R2.1: Secure Agent Tool Contracts & Simulation
+# ---------------------------------------------------------
+from enum import Enum
+
+
+class PlanVariantType(str, Enum):
+    PACING_REDUCTION = "pacing_reduction"
+    DEFER_OPTIONAL = "defer_optional"
+    TARGET_DATE_ACCELERATION = "target_date_acceleration"
+    CUSTOM_HOURS = "custom_hours"
+    REPRIORITIZE_INCOMPLETE = "reprioritize_incomplete"
+
+
+class ValidityStatus(str, Enum):
+    VALID_AND_FEASIBLE = "VALID_AND_FEASIBLE"
+    VALID_BUT_INFEASIBLE = "VALID_BUT_INFEASIBLE"
+    INVALID = "INVALID"
+    INSUFFICIENT_INFORMATION = "INSUFFICIENT_INFORMATION"
+
+
+class SimulatePlanVariantRequest(BaseModel):
+    variant_type: PlanVariantType = Field(
+        ...,
+        description="Type of simulated adjustment to evaluate against active mission",
+    )
+    weekly_hours: Optional[int] = Field(
+        None,
+        ge=1,
+        le=80,
+        description="Hypothetical weekly study hours (1 to 80)",
+    )
+    target_date: Optional[str] = Field(
+        None,
+        description="Hypothetical target completion or internship deadline date (YYYY-MM-DD or ISO-8601)",
+    )
+    defer_optional_skills: bool = Field(
+        default=False,
+        description="Whether to defer non-mandatory/elective role requirements",
+    )
+    temporary_availability_overrides: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Optional temporary overrides (e.g. override_hours for exam periods)",
+    )
+    rationale: Optional[str] = Field(
+        default=None,
+        max_length=500,
+        description="Untrusted descriptive rationale for the simulation (not executable)",
+    )
+    mission_id: Optional[int] = Field(
+        default=None,
+        description="Optional explicit mission ID (must belong to server-scoped active student)",
+    )
+
+
+class SimulatePlanVariantResponse(BaseModel):
+    simulation_id: str
+    mission_id: int
+    base_version_number: int
+    variant_type: str
+    validity_status: ValidityStatus
+    feasibility_assessment: str
+    feasibility_limitations: list[str] = Field(default_factory=list)
+    mandatory_requirements_preserved: bool = True
+    optional_requirements_deferred: list[int] = Field(default_factory=list)
+    prerequisite_validity: bool = True
+    completed_work_preserved: bool = True
+    tasks_summary: dict[str, int] = Field(default_factory=dict)
+    estimated_remaining_hours_min: int = 0
+    estimated_remaining_hours_max: int = 0
+    permitted_weekly_hours: int = 0
+    estimated_weeks_range: tuple[float, float] = (0.0, 0.0)
+    proposed_plan_snapshot: Optional[dict[str, Any]] = None
+    diff_summary: dict[str, Any] = Field(default_factory=dict)
+    comparison_summary: str = ""
+    validation_warnings: list[str] = Field(default_factory=list)
+    engine_identity: str = "c++20_learning_path_engine"
+    trace_reference: Optional[dict[str, Any]] = None
+
+
+class VariantTradeoffItem(BaseModel):
+    variant_type: str
+    validity_status: str
+    estimated_remaining_hours_range: tuple[int, int]
+    estimated_weeks_range: tuple[float, float]
+    deferred_optional_count: int
+    tradeoff_notes: list[str] = Field(default_factory=list)
+
+
+class ComparePlanVariantsRequest(BaseModel):
+    simulations: list[dict[str, Any]] = Field(
+        ...,
+        min_length=2,
+        description="List of at least two SimulatePlanVariantResponse dicts to compare",
+    )
+
+
+class ComparePlanVariantsResponse(BaseModel):
+    total_variants_compared: int
+    feasible_variants_count: int
+    recommended_candidates: list[str]
+    tradeoff_analysis: list[VariantTradeoffItem]
+    comparison_matrix: dict[str, Any]
+    recommendation_rationale: str
+
+
+class CheckPrerequisiteSafetyRequest(BaseModel):
+    target_skills: list[int] = Field(
+        ...,
+        min_length=1,
+        description="Skill IDs proposed to study or target",
+    )
+    completed_skills: list[int] = Field(
+        default_factory=list,
+        description="Skill IDs currently mastered/completed",
+    )
+
+
+class CheckPrerequisiteSafetyResponse(BaseModel):
+    is_safe: bool
+    has_cycle: bool
+    missing_prerequisites: list[dict[str, Any]] = Field(default_factory=list)
+    prerequisite_closure: list[int] = Field(default_factory=list)
+    details: str
+
+
+class ToolDefinition(BaseModel):
+    name: str
+    description: str
+    parameters: dict[str, Any]
+    returns: dict[str, Any]
+    permission_tier: str = Field(
+        pattern="^(read_only|proposal_stage)$",
+        description="Tool permission tier (read_only or proposal_stage)",
+    )
+    timeout_seconds: int = 5
+    max_input_bytes: int = 16384
+
+
+
 

@@ -46,7 +46,16 @@ from .schemas import (
     AgentEventResponse,
     AgentSimulateRequest,
     AgentRunResponse,
+    SimulatePlanVariantRequest,
+    SimulatePlanVariantResponse,
+    ComparePlanVariantsRequest,
+    ComparePlanVariantsResponse,
+    CheckPrerequisiteSafetyRequest,
+    CheckPrerequisiteSafetyResponse,
+    ToolDefinition,
 )
+from .agent.tools import AgentToolRegistry, ToolPermissionError
+
 
 
 from contextlib import asynccontextmanager
@@ -960,5 +969,147 @@ def get_agent_run_by_id(
             detail=f"Agent run '{run_id}' not found.",
         )
     return AgentRunResponse(**format_agent_run_dict(run))
+
+
+# ---------------------------------------------------------------------------
+# Phase R2.1: Agent Tool Registry & Counterfactual Plan Simulation Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/v1/agent/tools/simulate-plan-variant",
+    response_model=SimulatePlanVariantResponse,
+    status_code=status.HTTP_200_OK,
+)
+def simulate_plan_variant_endpoint(
+    payload: SimulatePlanVariantRequest,
+    db: Session = Depends(get_db),
+):
+    """Simulate counterfactual adjustment to active Career Mission without database mutation."""
+    dev_student = crud.get_or_create_dev_student(db)
+    registry = AgentToolRegistry(db, dev_student.id)
+    try:
+        result = registry.execute_tool(
+            "simulate_plan_variant",
+            variant_type=payload.variant_type,
+            weekly_hours=payload.weekly_hours,
+            target_date=payload.target_date,
+            defer_optional_skills=payload.defer_optional_skills,
+            temporary_availability_overrides=payload.temporary_availability_overrides,
+            rationale=payload.rationale,
+            mission_id=payload.mission_id,
+        )
+        return SimulatePlanVariantResponse(**result)
+    except ToolPermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Simulation error: {exc}",
+        ) from exc
+
+
+@app.post(
+    "/v1/agent/tools/compare-plan-variants",
+    response_model=ComparePlanVariantsResponse,
+    status_code=status.HTTP_200_OK,
+)
+def compare_plan_variants_endpoint(
+    payload: ComparePlanVariantsRequest,
+    db: Session = Depends(get_db),
+):
+    """Compare multiple simulated plan variants across feasibility, runway, and trade-offs."""
+    dev_student = crud.get_or_create_dev_student(db)
+    registry = AgentToolRegistry(db, dev_student.id)
+    try:
+        result = registry.execute_tool(
+            "compare_plan_variants",
+            simulations=payload.simulations,
+        )
+        return ComparePlanVariantsResponse(**result)
+    except ToolPermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@app.post(
+    "/v1/agent/tools/check-prerequisite-safety",
+    response_model=CheckPrerequisiteSafetyResponse,
+    status_code=status.HTTP_200_OK,
+)
+def check_prerequisite_safety_endpoint(
+    payload: CheckPrerequisiteSafetyRequest,
+    db: Session = Depends(get_db),
+):
+    """Validate whether target skills and completed skills form a cycle-free DAG."""
+    dev_student = crud.get_or_create_dev_student(db)
+    registry = AgentToolRegistry(db, dev_student.id)
+    try:
+        result = registry.execute_tool(
+            "check_prerequisite_safety",
+            target_skills=payload.target_skills,
+            completed_skills=payload.completed_skills,
+        )
+        return CheckPrerequisiteSafetyResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@app.get(
+    "/v1/agent/tools",
+    response_model=list[ToolDefinition],
+    status_code=status.HTTP_200_OK,
+)
+def list_agent_tool_definitions(
+    db: Session = Depends(get_db),
+):
+    """List provider-neutral tool definitions and parameter schemas for LLM tool calling."""
+    dev_student = crud.get_or_create_dev_student(db)
+    registry = AgentToolRegistry(db, dev_student.id)
+    return registry.get_tool_definitions()
+
+
+@app.get(
+    "/v1/agent/tools/gemini",
+    status_code=status.HTTP_200_OK,
+)
+def export_gemini_tools_endpoint(
+    db: Session = Depends(get_db),
+):
+    """Export tool declarations formatted for Google Gemini function calling API."""
+    dev_student = crud.get_or_create_dev_student(db)
+    registry = AgentToolRegistry(db, dev_student.id)
+    return registry.export_gemini_tools()
+
+
+@app.get(
+    "/v1/agent/tools/openai",
+    status_code=status.HTTP_200_OK,
+)
+def export_openai_tools_endpoint(
+    db: Session = Depends(get_db),
+):
+    """Export tool declarations formatted for OpenAI function calling API."""
+    dev_student = crud.get_or_create_dev_student(db)
+    registry = AgentToolRegistry(db, dev_student.id)
+    return registry.export_openai_tools()
+
 
 
