@@ -5,6 +5,7 @@ The argument transport passes safe, strictly validated numeric flags directly to
 """
 import json
 import os
+import sys
 from pathlib import Path
 import subprocess
 from .schemas import (
@@ -24,13 +25,25 @@ def engine_path() -> Path:
     configured = os.getenv("INTERNPATH_DSA_BIN")
     if configured:
         return Path(configured).expanduser().resolve()
-    candidates = [
-        ROOT / "build/engine/internpath_dsa",
-        ROOT / "build/engine/internpath_dsa.exe",
-        ROOT / "build/engine/Release/internpath_dsa.exe",
-    ]
+    
+    if sys.platform == "win32":
+        candidates = [
+            ROOT / "build/engine_msvc_win/Release/internpath_dsa.exe",
+            ROOT / "build/engine/Release/internpath_dsa.exe",
+            ROOT / "build/engine/internpath_dsa.exe",
+            ROOT / "build/engine/internpath_dsa",
+        ]
+    else:
+        candidates = [
+            ROOT / "build/engine/internpath_dsa",
+            ROOT / "build/engine_linux/internpath_dsa",
+            ROOT / "build/engine/internpath_dsa.exe",
+            ROOT / "build/engine/Release/internpath_dsa.exe",
+        ]
     for candidate in candidates:
         if candidate.is_file():
+            if sys.platform == "win32" and not str(candidate).endswith(".exe"):
+                continue
             return candidate
     raise EngineUnavailable("C++ engine not built. See README: compile with CMake first.")
 

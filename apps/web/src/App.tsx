@@ -425,6 +425,8 @@ export default function App() {
         activeRoleTitle={selectedRole?.title}
         weeklyHours={weeklyHours}
         activeMission={activeMission}
+        currentTab={activeTab}
+        onDataRefresh={loadInitialData}
       />
 
       {/* Guided Student Onboarding Flow (R1.2) */}

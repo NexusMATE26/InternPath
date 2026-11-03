@@ -10,6 +10,14 @@ from app.database import engine, Base, SessionLocal
 from app.seed import seed_database
 import app.models  # noqa: F401
 
+# Fail-closed guard: ensure tests NEVER run against persistent dev database
+_db_url_str = str(engine.url).lower()
+if "test" not in _db_url_str or _db_url_str.endswith("/internpath.db") or _db_url_str.endswith("\\internpath.db"):
+    raise RuntimeError(
+        f"FATAL: Test suite attempting to run against non-test database: {engine.url}. "
+        "Tests must strictly run against an isolated test database!"
+    )
+
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_database():

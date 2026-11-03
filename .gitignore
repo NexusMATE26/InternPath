@@ -18,5 +18,6 @@ CMakeFiles/
 # Data never commit real student documents
 data/private/
 *.db
+*.db.*
 *.sqlite3
 *.tsbuildinfo

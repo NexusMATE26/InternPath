@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, event
@@ -21,6 +22,13 @@ elif raw_db_url.startswith("sqlite:///./"):
     DATABASE_URL = f"sqlite:///{API_DIR.joinpath(rel_path).as_posix()}"
 else:
     DATABASE_URL = raw_db_url
+
+# Fail-closed guard: prevent test execution from inadvertently using development database
+if ("pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ) and "test" not in DATABASE_URL.lower():
+    raise RuntimeError(
+        f"SAFETY GATE ENFORCED: Attempted to initialize database engine for tests with non-test database: {DATABASE_URL}. "
+        "Test runs must explicitly specify an isolated test database."
+    )
 
 
 # Engine configuration
