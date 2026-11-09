@@ -128,12 +128,30 @@ class GeminiProvider(BaseLLMProvider):
         return contents
 
     def _format_gemini_tools(self, tool_definitions: list[ToolDefinition]) -> list[dict[str, Any]]:
+        def normalize_schema(schema: Any) -> Any:
+            if isinstance(schema, dict):
+                normalized: dict[str, Any] = {}
+                for k, v in schema.items():
+                    if k == "type" and isinstance(v, str):
+                        normalized["type"] = v.upper()
+                    elif k in ("properties", "patternProperties") and isinstance(v, dict):
+                        normalized[k] = {prop_k: normalize_schema(prop_v) for prop_k, prop_v in v.items()}
+                    elif k == "items":
+                        normalized["items"] = normalize_schema(v)
+                    else:
+                        normalized[k] = normalize_schema(v) if isinstance(v, (dict, list)) else v
+                return normalized
+            elif isinstance(schema, list):
+                return [normalize_schema(item) for item in schema]
+            return schema
+
         declarations = []
         for td in tool_definitions:
+            params = normalize_schema(td.parameters) if td.parameters else {"type": "OBJECT", "properties": {}}
             declarations.append({
                 "name": td.name,
                 "description": td.description,
-                "parameters": td.parameters,
+                "parameters": params,
             })
         # Support both snake_case and camelCase keys for official Gemini REST compatibility
         return [{"function_declarations": declarations, "functionDeclarations": declarations}]

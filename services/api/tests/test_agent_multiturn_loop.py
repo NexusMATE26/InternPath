@@ -50,6 +50,7 @@ from app.schemas import (
     AgentDecisionResult,
     AgentQueryRequest,
     PlanVariantType,
+    ToolDefinition,
     ValidityStatus,
 )
 
@@ -591,3 +592,128 @@ def test_student_query_no_active_mission():
     data = resp.json()
     assert data["decision_category"] == "no_action"
     assert "no active career mission" in data["decision_explanation"].lower()
+
+
+def test_multiturn_loop_dependent_tool_use_chain():
+    """Prove agentic behavior: model dynamically chooses subsequent tools based on previous tool results.
+    
+    Chain:
+    1. Model receives student inquiry.
+    2. Model chooses read_active_mission.
+    3. Model receives mission data (extracts mission_id, role, hours).
+    4. Model dynamically selects simulate_plan_variant with hours derived from context.
+    5. Model receives simulation output (extracts simulation_id, feasibility).
+    6. Model dynamically selects create_mission_change_proposal referencing the exact simulation_id.
+    7. Model receives proposal result (extracts proposal_id).
+    8. Model outputs grounded final decision referencing all dependent steps.
+    """
+    mission_id = _setup_active_mission(weekly_hours=15)
+
+    with SessionLocal() as db:
+        student = db.query(Student).first()
+        registry = AgentToolRegistry(db, student.id)
+
+        # Dynamic handler implementing the dependent agent reasoning logic
+        def dynamic_agent_reasoner(messages: list[AgentMessage], tool_definitions: list[ToolDefinition]) -> ModelTurnResponse:
+            last_msg = messages[-1]
+
+            # Step 1: Initial user message -> choose read_active_mission
+            if last_msg.role == "user" and not any(m.role == "tool" for m in messages):
+                return ModelTurnResponse(
+                    content="I will first inspect the student's active mission roadmap.",
+                    tool_calls=[
+                        ToolCall(
+                            id="call_read_mission_1",
+                            name="read_active_mission",
+                            arguments={"student_id": student.id},
+                        )
+                    ],
+                )
+
+            # Step 2: Tool result from read_active_mission -> inspect and choose simulate_plan_variant
+            if last_msg.role == "tool" and last_msg.name == "read_active_mission":
+                m_data = json.loads(last_msg.content) if isinstance(last_msg.content, str) else last_msg.content
+                active_hours = m_data.get("weekly_hours", 15)
+                # Dependent calculation: reduce to 4 hours due to exams
+                reduced_hours = 4 if active_hours > 4 else 2
+                return ModelTurnResponse(
+                    content=f"Active mission operates at {active_hours}h/week. Dynamically simulating exam pacing at {reduced_hours}h/week.",
+                    tool_calls=[
+                        ToolCall(
+                            id="call_sim_pacing_2",
+                            name="simulate_plan_variant",
+                            arguments={"variant_type": "pacing_reduction", "weekly_hours": reduced_hours},
+                        )
+                    ],
+                )
+
+            # Step 3: Tool result from simulate_plan_variant -> verify feasibility & stage proposal
+            if last_msg.role == "tool" and last_msg.name == "simulate_plan_variant":
+                sim_data = json.loads(last_msg.content) if isinstance(last_msg.content, str) else last_msg.content
+                sim_id = sim_data["simulation_id"]
+                is_feasible = sim_data["validity_status"] == "VALID_AND_FEASIBLE"
+                assert is_feasible, "Expected simulation to be feasible"
+                return ModelTurnResponse(
+                    content=f"Simulation {sim_id} verified feasible. Dynamically staging proposal referencing simulation.",
+                    tool_calls=[
+                        ToolCall(
+                            id="call_stage_proposal_3",
+                            name="create_mission_change_proposal",
+                            arguments={
+                                "mission_id": mission_id,
+                                "proposal_title": "Exam Pacing Adjustment (4 hrs/week)",
+                                "rationale": "C++ graph simulation confirms 4h/week pacing preserves prerequisite validity.",
+                                "simulation_id": sim_id,
+                            },
+                        )
+                    ],
+                )
+
+            # Step 4: Tool result from create_mission_change_proposal -> synthesize final grounded decision
+            if last_msg.role == "tool" and last_msg.name == "create_mission_change_proposal":
+                prop_data = json.loads(last_msg.content) if isinstance(last_msg.content, str) else last_msg.content
+                staged_pid = prop_data["proposal_id"]
+                decision_payload = {
+                    "decision_category": "proposed_mission_adjustment",
+                    "explanation": f"Evaluated and staged plan adjustment proposal #{staged_pid} grounded in C++ simulation.",
+                    "recommended_action": f"Review staged proposal #{staged_pid} in your Roadmap or Assistant drawer.",
+                    "confidence_score": 0.95,
+                    "tradeoffs": [
+                        "Reduces study commitment to 4h/week during university exams.",
+                        "Preserves 100% of completed milestone tasks.",
+                        "Roadmap re-indexed via C++ Kahn's topological sort.",
+                    ],
+                    "suggested_proposal_title": "Exam Pacing Adjustment (4 hrs/week)",
+                    "suggested_proposal_rationale": "Grounding in C++ simulation verified.",
+                }
+                return ModelTurnResponse(
+                    content=json.dumps(decision_payload),
+                    tool_calls=[],
+                )
+
+            raise RuntimeError(f"Unexpected state in dynamic_agent_reasoner: {last_msg.role} / {last_msg.name}")
+
+        provider = MockProvider(dynamic_handler=dynamic_agent_reasoner)
+        loop = AgentExecutionLoop(registry=registry, provider=provider, max_turns=6)
+
+        trace = loop.execute("I have university exams and can only study 4 hours per week. Can you help adjust my plan?")
+
+        # Assertions proving dependent tool chain execution
+        assert trace.engine_used == "mock_llm"
+        assert not trace.fallback_used
+        assert trace.total_tool_calls == 3
+        assert trace.tools_invoked == [
+            "read_active_mission",
+            "simulate_plan_variant",
+            "create_mission_change_proposal",
+        ]
+        assert trace.proposal_id is not None
+        assert trace.decision.decision_category == "proposed_mission_adjustment"
+        assert f"#{trace.proposal_id}" in trace.decision.explanation
+
+        # Verify staged proposal in database is strictly PENDING (human consent boundary)
+        proposal = db.query(MissionChangeProposal).filter(MissionChangeProposal.id == trace.proposal_id).first()
+        assert proposal is not None
+        assert proposal.status == "pending"
+        assert proposal.decided_at is None
+
