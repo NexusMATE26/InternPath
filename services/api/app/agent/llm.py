@@ -52,20 +52,39 @@ def sanitize_student_context(data: dict[str, Any]) -> dict[str, Any]:
 class LLMAdapter:
     """Bounded LLM Adapter for agent reasoning and trade-off synthesis."""
 
+    DEFAULT_TIMEOUT_SECONDS = 30.0
+    DEFAULT_MAX_RETRIES = 2
+
     def __init__(
         self,
         provider: Optional[str] = None,
         model: Optional[str] = None,
-        timeout_seconds: float = 8.0,
-        max_retries: int = 2,
+        timeout_seconds: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ):
         self.provider = (
             provider
             or os.environ.get("INTERNPATH_LLM_PROVIDER")
             or "deterministic"
         ).lower().strip()
-        self.timeout_seconds = timeout_seconds
-        self.max_retries = max_retries
+
+        if timeout_seconds is None:
+            env_t = os.environ.get("INTERNPATH_LLM_TIMEOUT_SECONDS")
+            try:
+                self.timeout_seconds = float(env_t) if env_t else self.DEFAULT_TIMEOUT_SECONDS
+            except ValueError:
+                self.timeout_seconds = self.DEFAULT_TIMEOUT_SECONDS
+        else:
+            self.timeout_seconds = timeout_seconds
+
+        if max_retries is None:
+            env_r = os.environ.get("INTERNPATH_LLM_MAX_RETRIES")
+            try:
+                self.max_retries = int(env_r) if env_r else self.DEFAULT_MAX_RETRIES
+            except ValueError:
+                self.max_retries = self.DEFAULT_MAX_RETRIES
+        else:
+            self.max_retries = max_retries
 
         self.gemini_key = os.environ.get("GEMINI_API_KEY")
         self.openai_key = os.environ.get("OPENAI_API_KEY")
@@ -210,9 +229,14 @@ class LLMAdapter:
             ),
         }
 
-        # Attempt call with retries
+        # Attempt call with retries respecting turn budget
         last_error = None
+        turn_deadline = time.time() + (self.timeout_seconds * (self.max_retries + 1))
         for attempt in range(self.max_retries + 1):
+            remaining_budget = turn_deadline - time.time()
+            if remaining_budget < 1.0:
+                logger.warning("LLM call attempt %d aborted: remaining budget exhausted (%.2fs).", attempt + 1, remaining_budget)
+                break
             t0 = time.time()
             try:
                 if self.provider == "gemini":
@@ -243,7 +267,10 @@ class LLMAdapter:
                     exc,
                 )
                 if attempt < self.max_retries:
-                    time.sleep(0.5 * (attempt + 1))
+                    backoff = 0.5 * (attempt + 1)
+                    if time.time() + backoff >= turn_deadline:
+                        break
+                    time.sleep(backoff)
 
         logger.warning(
             "All LLM attempts failed. Falling back safely to deterministic rules: %s",

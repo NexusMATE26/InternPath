@@ -25,6 +25,7 @@ Covers:
 """
 import json
 import pytest
+import time
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 
@@ -852,4 +853,157 @@ def test_multiturn_loop_dependent_tool_use_chain():
         assert proposal is not None
         assert proposal.status == "pending"
         assert proposal.decided_at is None
+
+
+# ---------------------------------------------------------------------------
+# 6. Timeout, Budget Constraints, and Retry Resilience Tests
+# ---------------------------------------------------------------------------
+
+def test_timeout_configuration_and_env_overrides(monkeypatch):
+    """Verify default timeouts (90s overall, 30s turn) and environment variable overrides."""
+    with SessionLocal() as db:
+        registry = AgentToolRegistry(db, 1)
+        mock_p = MockProvider()
+
+        # 1. Defaults
+        loop_default = AgentExecutionLoop(registry=registry, provider=mock_p)
+        assert loop_default.overall_timeout_seconds == 90.0
+        assert loop_default.turn_timeout_seconds == 30.0
+
+        gemini_default = GeminiProvider(api_key="mock_key")
+        assert gemini_default.timeout_seconds == 30.0
+        assert gemini_default.max_retries == 2
+
+        openai_default = OpenAIProvider(api_key="mock_key")
+        assert openai_default.timeout_seconds == 30.0
+        assert openai_default.max_retries == 2
+
+        adapter_default = LLMAdapter(provider="gemini")
+        assert adapter_default.timeout_seconds == 30.0
+        assert adapter_default.max_retries == 2
+
+        # 2. Environment variable overrides
+        monkeypatch.setenv("INTERNPATH_AGENT_TIMEOUT_SECONDS", "120.0")
+        monkeypatch.setenv("INTERNPATH_LLM_TIMEOUT_SECONDS", "45.0")
+        monkeypatch.setenv("INTERNPATH_LLM_MAX_RETRIES", "3")
+
+        loop_env = AgentExecutionLoop(registry=registry, provider=mock_p)
+        assert loop_env.overall_timeout_seconds == 120.0
+        assert loop_env.turn_timeout_seconds == 45.0
+
+        gemini_env = GeminiProvider(api_key="mock_key")
+        assert gemini_env.timeout_seconds == 45.0
+        assert gemini_env.max_retries == 3
+
+        adapter_env = LLMAdapter(provider="gemini")
+        assert adapter_env.timeout_seconds == 45.0
+        assert adapter_env.max_retries == 3
+
+
+def test_multiturn_loop_caps_turn_timeout_to_remaining_budget():
+    """Agent loop caps per-turn timeout so it never exceeds remaining overall budget."""
+    with SessionLocal() as db:
+        registry = AgentToolRegistry(db, 1)
+
+        captured_timeouts: list[float] = []
+
+        class BudgetTrackingProvider(MockProvider):
+            def generate_turn(self, messages, tool_definitions, timeout_seconds=None):
+                if timeout_seconds is not None:
+                    captured_timeouts.append(timeout_seconds)
+                return ModelTurnResponse(
+                    content=json.dumps({
+                        "decision_category": "no_action",
+                        "explanation": "Timeout tracking turn complete.",
+                        "recommended_action": "Done.",
+                        "confidence_score": 1.0,
+                        "tradeoffs": [],
+                    }),
+                    tool_calls=[],
+                )
+
+        provider = BudgetTrackingProvider()
+        # Set overall budget to 15.0s, which is strictly less than turn_timeout_seconds (30.0s)
+        loop = AgentExecutionLoop(
+            registry=registry,
+            provider=provider,
+            overall_timeout_seconds=15.0,
+            turn_timeout_seconds=30.0,
+        )
+
+        trace = loop.execute("Test turn timeout capping.")
+        assert len(captured_timeouts) == 1
+        # The turn timeout MUST be capped by remaining overall budget (<= 15.0s)
+        assert captured_timeouts[0] <= 15.0
+        assert not trace.fallback_used
+
+
+def test_multiturn_loop_exhausted_overall_budget_fallback():
+    """When overall time budget is nearly exhausted (< 2.0s), agent loop safely falls back."""
+    with SessionLocal() as db:
+        registry = AgentToolRegistry(db, 1)
+        provider = MockProvider()
+
+        # Overall timeout < 2.0s triggers safe fallback without attempting provider call
+        loop = AgentExecutionLoop(
+            registry=registry,
+            provider=provider,
+            overall_timeout_seconds=1.5,
+        )
+
+        trace = loop.execute("Test tight budget fallback.")
+        assert trace.fallback_used is True
+        assert trace.fallback_reason == "overall_timeout_exceeded"
+        assert trace.engine_used == "deterministic_rules"
+        assert trace.decision.decision_category == "human_review_required"
+
+
+def test_gemini_provider_aborts_retries_when_turn_budget_exhausted(monkeypatch):
+    """GeminiProvider does not waste time on retries when the turn deadline has passed."""
+    import urllib.request
+    from urllib.error import URLError
+
+    provider = GeminiProvider(api_key="mock_key", timeout_seconds=2.0, max_retries=3)
+
+    call_count = 0
+
+    def mock_urlopen(req, timeout=None):
+        nonlocal call_count
+        call_count += 1
+        raise URLError("The read operation timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    t0 = time.time()
+    with pytest.raises(RuntimeError, match="Gemini API request failed"):
+        # Explicit tiny turn timeout of 0.05s
+        provider.generate_turn(messages=[], tool_definitions=[], timeout_seconds=0.05)
+    duration = time.time() - t0
+
+    # Retries must have been aborted because deadline expired
+    assert call_count < 4
+    assert duration < 2.0
+
+
+def test_openai_provider_aborts_retries_when_turn_budget_exhausted(monkeypatch):
+    """OpenAIProvider aborts retries when the turn deadline has passed."""
+    import urllib.request
+    from urllib.error import URLError
+
+    provider = OpenAIProvider(api_key="mock_key", timeout_seconds=2.0, max_retries=3)
+
+    call_count = 0
+
+    def mock_urlopen(req, timeout=None):
+        nonlocal call_count
+        call_count += 1
+        raise URLError("The read operation timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    with pytest.raises(RuntimeError, match="OpenAI API request failed"):
+        provider.generate_turn(messages=[], tool_definitions=[], timeout_seconds=0.05)
+
+    assert call_count < 4
+
 

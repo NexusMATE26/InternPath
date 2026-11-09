@@ -25,7 +25,15 @@ logger = logging.getLogger("internpath.agent.providers")
 class BaseLLMProvider(abc.ABC):
     """Abstract base class for provider-compatible function/tool-calling adapters."""
 
-    def __init__(self, model_name: str, timeout_seconds: float = 10.0, max_retries: int = 2):
+    DEFAULT_TIMEOUT_SECONDS = 30.0
+    DEFAULT_MAX_RETRIES = 2
+
+    def __init__(
+        self,
+        model_name: str,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+    ):
         self.model_name = model_name
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
@@ -123,15 +131,37 @@ def normalize_gemini_schema(schema: Any) -> dict[str, Any]:
 class GeminiProvider(BaseLLMProvider):
     """Google Gemini REST API adapter supporting official function calling."""
 
+    DEFAULT_TIMEOUT_SECONDS = 30.0
+    DEFAULT_MAX_RETRIES = 2
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        timeout_seconds: float = 10.0,
-        max_retries: int = 2,
+        timeout_seconds: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ):
         model = model_name or os.environ.get("INTERNPATH_LLM_MODEL") or "gemini-1.5-flash"
-        super().__init__(model_name=model, timeout_seconds=timeout_seconds, max_retries=max_retries)
+
+        if timeout_seconds is None:
+            env_t = os.environ.get("INTERNPATH_LLM_TIMEOUT_SECONDS")
+            try:
+                t_val = float(env_t) if env_t else self.DEFAULT_TIMEOUT_SECONDS
+            except ValueError:
+                t_val = self.DEFAULT_TIMEOUT_SECONDS
+        else:
+            t_val = timeout_seconds
+
+        if max_retries is None:
+            env_r = os.environ.get("INTERNPATH_LLM_MAX_RETRIES")
+            try:
+                r_val = int(env_r) if env_r else self.DEFAULT_MAX_RETRIES
+            except ValueError:
+                r_val = self.DEFAULT_MAX_RETRIES
+        else:
+            r_val = max_retries
+
+        super().__init__(model_name=model, timeout_seconds=t_val, max_retries=r_val)
         self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
 
     def get_engine_label(self) -> str:
@@ -239,9 +269,20 @@ class GeminiProvider(BaseLLMProvider):
         )
 
         last_error: Optional[Exception] = None
+        turn_deadline = time.time() + timeout
         for attempt in range(self.max_retries + 1):
+            remaining_for_turn = turn_deadline - time.time()
+            if remaining_for_turn < 1.0:
+                logger.warning(
+                    "Gemini API remaining turn budget (%.2fs) exhausted before attempt %d.",
+                    remaining_for_turn,
+                    attempt + 1,
+                )
+                break
+
+            attempt_timeout = min(self.timeout_seconds, remaining_for_turn)
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with urllib.request.urlopen(req, timeout=attempt_timeout) as resp:
                     resp_data = json.loads(resp.read().decode("utf-8"))
                     candidates = resp_data.get("candidates", [])
                     if not candidates:
@@ -300,23 +341,53 @@ class GeminiProvider(BaseLLMProvider):
                 last_error = f"{exc}{err_detail}"
                 logger.warning("Gemini API call attempt %d failed: %s", attempt + 1, last_error)
                 if attempt < self.max_retries:
-                    time.sleep(0.5 * (attempt + 1))
+                    backoff = 0.5 * (attempt + 1)
+                    if time.time() + backoff >= turn_deadline:
+                        logger.warning(
+                            "Not enough turn budget remaining (%.2fs) for retry backoff (%.2fs).",
+                            turn_deadline - time.time(),
+                            backoff,
+                        )
+                        break
+                    time.sleep(backoff)
 
-        raise RuntimeError(f"Gemini API request failed after {self.max_retries + 1} attempts: {last_error}")
+        raise RuntimeError(f"Gemini API request failed after {attempt + 1} attempt(s): {last_error}")
 
 
 class OpenAIProvider(BaseLLMProvider):
     """OpenAI Chat Completions REST API adapter supporting official tool calling."""
 
+    DEFAULT_TIMEOUT_SECONDS = 30.0
+    DEFAULT_MAX_RETRIES = 2
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        timeout_seconds: float = 10.0,
-        max_retries: int = 2,
+        timeout_seconds: Optional[float] = None,
+        max_retries: Optional[int] = None,
     ):
         model = model_name or os.environ.get("INTERNPATH_LLM_MODEL") or "gpt-4o-mini"
-        super().__init__(model_name=model, timeout_seconds=timeout_seconds, max_retries=max_retries)
+
+        if timeout_seconds is None:
+            env_t = os.environ.get("INTERNPATH_LLM_TIMEOUT_SECONDS")
+            try:
+                t_val = float(env_t) if env_t else self.DEFAULT_TIMEOUT_SECONDS
+            except ValueError:
+                t_val = self.DEFAULT_TIMEOUT_SECONDS
+        else:
+            t_val = timeout_seconds
+
+        if max_retries is None:
+            env_r = os.environ.get("INTERNPATH_LLM_MAX_RETRIES")
+            try:
+                r_val = int(env_r) if env_r else self.DEFAULT_MAX_RETRIES
+            except ValueError:
+                r_val = self.DEFAULT_MAX_RETRIES
+        else:
+            r_val = max_retries
+
+        super().__init__(model_name=model, timeout_seconds=t_val, max_retries=r_val)
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
 
     def get_engine_label(self) -> str:
@@ -408,9 +479,20 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
         last_error: Optional[Exception] = None
+        turn_deadline = time.time() + timeout
         for attempt in range(self.max_retries + 1):
+            remaining_for_turn = turn_deadline - time.time()
+            if remaining_for_turn < 1.0:
+                logger.warning(
+                    "OpenAI API remaining turn budget (%.2fs) exhausted before attempt %d.",
+                    remaining_for_turn,
+                    attempt + 1,
+                )
+                break
+
+            attempt_timeout = min(self.timeout_seconds, remaining_for_turn)
             try:
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                with urllib.request.urlopen(req, timeout=attempt_timeout) as resp:
                     resp_data = json.loads(resp.read().decode("utf-8"))
                     choices = resp_data.get("choices", [])
                     if not choices:
@@ -465,9 +547,17 @@ class OpenAIProvider(BaseLLMProvider):
                 last_error = f"{exc}{err_detail}"
                 logger.warning("OpenAI API call attempt %d failed: %s", attempt + 1, last_error)
                 if attempt < self.max_retries:
-                    time.sleep(0.5 * (attempt + 1))
+                    backoff = 0.5 * (attempt + 1)
+                    if time.time() + backoff >= turn_deadline:
+                        logger.warning(
+                            "Not enough turn budget remaining (%.2fs) for retry backoff (%.2fs).",
+                            turn_deadline - time.time(),
+                            backoff,
+                        )
+                        break
+                    time.sleep(backoff)
 
-        raise RuntimeError(f"OpenAI API request failed after {self.max_retries + 1} attempts: {last_error}")
+        raise RuntimeError(f"OpenAI API request failed after {attempt + 1} attempt(s): {last_error}")
 
 
 class MockProvider(BaseLLMProvider):

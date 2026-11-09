@@ -12,6 +12,7 @@ Orchestrates the model-selected tool calling lifecycle:
 """
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, Optional
@@ -37,7 +38,8 @@ class AgentExecutionLoop:
 
     DEFAULT_MAX_TURNS = 5
     DEFAULT_MAX_TOOL_CALLS = 8
-    DEFAULT_OVERALL_TIMEOUT = 25.0
+    DEFAULT_OVERALL_TIMEOUT = 90.0
+    DEFAULT_TURN_TIMEOUT = 30.0
 
     def __init__(
         self,
@@ -45,13 +47,31 @@ class AgentExecutionLoop:
         provider: BaseLLMProvider,
         max_turns: int = DEFAULT_MAX_TURNS,
         max_tool_calls: int = DEFAULT_MAX_TOOL_CALLS,
-        overall_timeout_seconds: float = DEFAULT_OVERALL_TIMEOUT,
+        overall_timeout_seconds: Optional[float] = None,
+        turn_timeout_seconds: Optional[float] = None,
     ):
         self.registry = registry
         self.provider = provider
         self.max_turns = max_turns
         self.max_tool_calls = max_tool_calls
-        self.overall_timeout_seconds = overall_timeout_seconds
+
+        if overall_timeout_seconds is None:
+            env_val = os.environ.get("INTERNPATH_AGENT_TIMEOUT_SECONDS")
+            try:
+                self.overall_timeout_seconds = float(env_val) if env_val else self.DEFAULT_OVERALL_TIMEOUT
+            except ValueError:
+                self.overall_timeout_seconds = self.DEFAULT_OVERALL_TIMEOUT
+        else:
+            self.overall_timeout_seconds = overall_timeout_seconds
+
+        if turn_timeout_seconds is None:
+            env_val = os.environ.get("INTERNPATH_LLM_TIMEOUT_SECONDS")
+            try:
+                self.turn_timeout_seconds = float(env_val) if env_val else self.DEFAULT_TURN_TIMEOUT
+            except ValueError:
+                self.turn_timeout_seconds = self.DEFAULT_TURN_TIMEOUT
+        else:
+            self.turn_timeout_seconds = turn_timeout_seconds
 
     def _build_system_instruction(self) -> str:
         return (
@@ -125,7 +145,9 @@ class AgentExecutionLoop:
         for turn_idx in range(1, self.max_turns + 1):
             turn_start = time.time()
             elapsed_total = time.time() - start_time
-            if elapsed_total > self.overall_timeout_seconds:
+            remaining_overall = self.overall_timeout_seconds - elapsed_total
+
+            if remaining_overall <= 0 or elapsed_total > self.overall_timeout_seconds:
                 logger.warning("Agent loop overall timeout exceeded (%.1fs > %.1fs).", elapsed_total, self.overall_timeout_seconds)
                 return self._fallback_response(
                     reason="overall_timeout_exceeded",
@@ -138,12 +160,33 @@ class AgentExecutionLoop:
                     start_time=start_time,
                 )
 
+            # If remaining overall budget is too tight for an LLM turn + potential tool calls,
+            # trigger graceful fallback rather than timing out unproductively mid-flight.
+            if remaining_overall < 2.0:
+                logger.warning(
+                    "Agent loop overall time budget nearly exhausted (%.1fs remaining < 2.0s).",
+                    remaining_overall,
+                )
+                return self._fallback_response(
+                    reason="overall_timeout_exceeded",
+                    turns=turns_audit,
+                    tools_invoked=tools_invoked_names,
+                    total_tool_calls=total_tool_calls_count,
+                    total_tokens=total_tokens_count,
+                    proposal_id=staged_proposal_id,
+                    fallback_gen=fallback_decision_generator,
+                    start_time=start_time,
+                )
+
+            # Turn timeout is bounded by both configured turn timeout and remaining overall budget
+            turn_timeout = min(self.turn_timeout_seconds, remaining_overall)
+
             # Request turn from provider
             try:
                 turn_resp: ModelTurnResponse = self.provider.generate_turn(
                     messages=messages,
                     tool_definitions=tool_definitions,
-                    timeout_seconds=min(10.0, max(2.0, self.overall_timeout_seconds - elapsed_total)),
+                    timeout_seconds=turn_timeout,
                 )
             except Exception as exc:
                 logger.warning("Provider generate_turn error on turn %d: %s", turn_idx, exc)
