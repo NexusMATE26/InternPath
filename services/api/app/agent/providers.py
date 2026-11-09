@@ -51,6 +51,75 @@ class BaseLLMProvider(abc.ABC):
         pass
 
 
+def normalize_gemini_schema(schema: Any) -> dict[str, Any]:
+    """Recursively normalize OpenAPI/JSON Schema dicts into valid Google Gemini Schema definitions.
+
+    Invariants enforced for Google Gemini Function Declarations:
+    1. Schema must be a dictionary with an uppercase 'type' (OBJECT, ARRAY, STRING, INTEGER, NUMBER, BOOLEAN).
+    2. Every schema of type 'ARRAY' MUST contain an 'items' schema dict with a valid 'type'.
+    3. If an array's 'items' is omitted, empty, or missing 'type', it is safely defaulted to a generic OBJECT schema.
+    4. Every schema of type 'OBJECT' has a 'properties' dictionary (defaulting to {} if omitted).
+    5. Nested arrays (e.g. array of arrays, or arrays inside objects inside arrays) are normalized recursively.
+    6. 'required' lists on OBJECT schemas are validated to only include field names that exist in 'properties'.
+    7. Standard Gemini Schema metadata fields ('description', 'enum', 'format', 'nullable') are preserved.
+    """
+    if not isinstance(schema, dict):
+        return {"type": "OBJECT", "properties": {}}
+
+    result: dict[str, Any] = {}
+
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str):
+        schema_type = raw_type.upper()
+    elif "properties" in schema:
+        schema_type = "OBJECT"
+    elif "items" in schema:
+        schema_type = "ARRAY"
+    else:
+        schema_type = "OBJECT"
+
+    result["type"] = schema_type
+
+    if "description" in schema and isinstance(schema["description"], str):
+        result["description"] = schema["description"]
+    if "enum" in schema and isinstance(schema["enum"], list):
+        result["enum"] = schema["enum"]
+    if "format" in schema and isinstance(schema["format"], str):
+        result["format"] = schema["format"]
+    if "nullable" in schema and isinstance(schema["nullable"], bool):
+        result["nullable"] = schema["nullable"]
+
+    if schema_type == "ARRAY":
+        raw_items = schema.get("items")
+        if isinstance(raw_items, dict):
+            norm_items = normalize_gemini_schema(raw_items)
+            if "type" not in norm_items:
+                norm_items["type"] = "OBJECT"
+            if norm_items["type"] == "OBJECT" and "properties" not in norm_items:
+                norm_items["properties"] = {}
+            result["items"] = norm_items
+        elif isinstance(raw_items, list) and raw_items:
+            result["items"] = normalize_gemini_schema(raw_items[0])
+        else:
+            result["items"] = {"type": "OBJECT", "properties": {}}
+    elif schema_type == "OBJECT":
+        raw_props = schema.get("properties")
+        if not isinstance(raw_props, dict) and "patternProperties" in schema and isinstance(schema["patternProperties"], dict):
+            raw_props = schema["patternProperties"]
+        if isinstance(raw_props, dict):
+            result["properties"] = {k: normalize_gemini_schema(v) for k, v in raw_props.items()}
+        else:
+            result["properties"] = {}
+        raw_req = schema.get("required")
+        if isinstance(raw_req, list):
+            req_list = [str(r) for r in raw_req if isinstance(r, (str, int))]
+            valid_req = [r for r in req_list if r in result["properties"]]
+            if valid_req:
+                result["required"] = valid_req
+
+    return result
+
+
 class GeminiProvider(BaseLLMProvider):
     """Google Gemini REST API adapter supporting official function calling."""
 
@@ -128,33 +197,14 @@ class GeminiProvider(BaseLLMProvider):
         return contents
 
     def _format_gemini_tools(self, tool_definitions: list[ToolDefinition]) -> list[dict[str, Any]]:
-        def normalize_schema(schema: Any) -> Any:
-            if isinstance(schema, dict):
-                normalized: dict[str, Any] = {}
-                for k, v in schema.items():
-                    if k == "type" and isinstance(v, str):
-                        normalized["type"] = v.upper()
-                    elif k in ("properties", "patternProperties") and isinstance(v, dict):
-                        normalized[k] = {prop_k: normalize_schema(prop_v) for prop_k, prop_v in v.items()}
-                    elif k == "items":
-                        normalized["items"] = normalize_schema(v)
-                    else:
-                        normalized[k] = normalize_schema(v) if isinstance(v, (dict, list)) else v
-                return normalized
-            elif isinstance(schema, list):
-                return [normalize_schema(item) for item in schema]
-            return schema
-
         declarations = []
         for td in tool_definitions:
-            params = normalize_schema(td.parameters) if td.parameters else {"type": "OBJECT", "properties": {}}
             declarations.append({
                 "name": td.name,
                 "description": td.description,
-                "parameters": params,
+                "parameters": normalize_gemini_schema(td.parameters),
             })
-        # Support both snake_case and camelCase keys for official Gemini REST compatibility
-        return [{"function_declarations": declarations, "functionDeclarations": declarations}]
+        return [{"function_declarations": declarations}]
 
     def generate_turn(
         self,

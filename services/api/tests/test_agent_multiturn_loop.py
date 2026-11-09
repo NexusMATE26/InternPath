@@ -42,7 +42,7 @@ from app.models import (
 )
 from app.agent.tools import AgentToolRegistry
 from app.agent.types import AgentMessage, ModelTurnResponse, ToolCall
-from app.agent.providers import GeminiProvider, OpenAIProvider, MockProvider
+from app.agent.providers import GeminiProvider, OpenAIProvider, MockProvider, normalize_gemini_schema
 from app.agent.loop import AgentExecutionLoop
 from app.agent.llm import LLMAdapter
 from app.agent.service import AgentService
@@ -128,6 +128,142 @@ def test_gemini_format_contents_and_tools():
         assert len(tools) == 1
         assert "function_declarations" in tools[0]
         assert len(tools[0]["function_declarations"]) == 14
+
+
+def test_gemini_every_tool_declaration_valid_schema():
+    """Verify that EVERY tool declaration sent to Gemini has recursively valid array and object schemas.
+    
+    Guarantees:
+    - No array property is ever missing an 'items' schema dict.
+    - Every 'items' schema contains a valid uppercase 'type'.
+    - Nested arrays and arrays inside objects all have valid 'items'.
+    - Specifically validates 'compare_plan_versions' active_version_tasks property.
+    """
+    provider = GeminiProvider(api_key="mock_key", model_name="gemini-1.5-flash")
+
+    def assert_valid_gemini_schema_recursive(schema: dict[str, Any], path: str):
+        assert isinstance(schema, dict), f"{path}: schema must be a dictionary"
+        assert "type" in schema, f"{path}: schema missing 'type' field"
+        valid_types = {"OBJECT", "ARRAY", "STRING", "INTEGER", "NUMBER", "BOOLEAN"}
+        assert schema["type"] in valid_types, f"{path}: invalid type '{schema['type']}'"
+
+        if schema["type"] == "ARRAY":
+            assert "items" in schema, f"{path}: ARRAY schema missing 'items' field"
+            assert isinstance(schema["items"], dict), f"{path}.items: must be a dictionary"
+            assert_valid_gemini_schema_recursive(schema["items"], f"{path}.items")
+
+        elif schema["type"] == "OBJECT":
+            assert "properties" in schema, f"{path}: OBJECT schema missing 'properties' field"
+            assert isinstance(schema["properties"], dict), f"{path}.properties: must be a dictionary"
+            for prop_name, prop_schema in schema["properties"].items():
+                assert_valid_gemini_schema_recursive(prop_schema, f"{path}.properties.{prop_name}")
+
+            if "required" in schema:
+                assert isinstance(schema["required"], list), f"{path}.required: must be a list"
+                for req_field in schema["required"]:
+                    assert req_field in schema["properties"], f"{path}: required field '{req_field}' not in properties"
+
+    with SessionLocal() as db:
+        registry = AgentToolRegistry(db, 1)
+        gemini_tools = provider._format_gemini_tools(registry.get_tool_definitions())
+
+        declarations = gemini_tools[0]["function_declarations"]
+        assert len(declarations) == 14, f"Expected 14 tool declarations, got {len(declarations)}"
+
+        decl_map = {}
+        for decl in declarations:
+            decl_name = decl["name"]
+            decl_map[decl_name] = decl
+            assert "parameters" in decl, f"{decl_name}: declaration missing 'parameters'"
+            assert_valid_gemini_schema_recursive(decl["parameters"], decl_name)
+
+        # Specifically verify compare_plan_versions active_version_tasks
+        comp_decl = decl_map["compare_plan_versions"]
+        active_tasks_schema = comp_decl["parameters"]["properties"]["active_version_tasks"]
+        assert active_tasks_schema["type"] == "ARRAY"
+        assert "items" in active_tasks_schema
+        assert active_tasks_schema["items"]["type"] == "OBJECT"
+        assert "properties" in active_tasks_schema["items"]
+
+
+def test_gemini_schema_normalizer_nested_arrays_and_edge_cases():
+    """Verify normalize_gemini_schema handles arbitrary nested arrays, missing items, and edge cases."""
+    # 1. Bare array missing items entirely
+    s1 = {"type": "array"}
+    n1 = normalize_gemini_schema(s1)
+    assert n1["type"] == "ARRAY"
+    assert n1["items"] == {"type": "OBJECT", "properties": {}}
+
+    # 2. Nested array of arrays missing items
+    s2 = {"type": "array", "items": {"type": "array"}}
+    n2 = normalize_gemini_schema(s2)
+    assert n2["type"] == "ARRAY"
+    assert n2["items"]["type"] == "ARRAY"
+    assert n2["items"]["items"] == {"type": "OBJECT", "properties": {}}
+
+    # 3. Object with array property missing items
+    s3 = {
+        "type": "object",
+        "properties": {
+            "tags": {"type": "array"},
+            "count": {"type": "integer"},
+        },
+        "required": ["tags"],
+    }
+    n3 = normalize_gemini_schema(s3)
+    assert n3["type"] == "OBJECT"
+    assert n3["properties"]["tags"]["type"] == "ARRAY"
+    assert n3["properties"]["tags"]["items"] == {"type": "OBJECT", "properties": {}}
+    assert n3["properties"]["count"]["type"] == "INTEGER"
+    assert n3["required"] == ["tags"]
+
+    # 4. Array with items containing object with nested array missing items
+    s4 = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "sub_list": {"type": "array"},
+            },
+        },
+    }
+    n4 = normalize_gemini_schema(s4)
+    assert n4["type"] == "ARRAY"
+    assert n4["items"]["type"] == "OBJECT"
+    assert n4["items"]["properties"]["sub_list"]["type"] == "ARRAY"
+    assert n4["items"]["properties"]["sub_list"]["items"] == {"type": "OBJECT", "properties": {}}
+
+    # 5. Items dict with properties but no type field
+    s5 = {"type": "array", "items": {"properties": {"id": {"type": "string"}}}}
+    n5 = normalize_gemini_schema(s5)
+    assert n5["type"] == "ARRAY"
+    assert n5["items"]["type"] == "OBJECT"
+    assert n5["items"]["properties"]["id"]["type"] == "STRING"
+
+    # 6. Invalid non-dict input safely handled
+    n6 = normalize_gemini_schema(None)
+    assert n6 == {"type": "OBJECT", "properties": {}}
+
+
+def test_export_gemini_tools_registry_compliance():
+    """Verify that AgentToolRegistry.export_gemini_tools also generates normalized, valid Gemini schemas."""
+    with SessionLocal() as db:
+        registry = AgentToolRegistry(db, 1)
+        exported = registry.export_gemini_tools()
+
+        assert len(exported) == 1
+        assert "function_declarations" in exported[0]
+        declarations = exported[0]["function_declarations"]
+        assert len(declarations) == 14
+
+        for decl in declarations:
+            params = decl["parameters"]
+            assert params["type"] == "OBJECT"
+            assert "properties" in params
+            for p_name, p_schema in params["properties"].items():
+                if p_schema.get("type") == "ARRAY":
+                    assert "items" in p_schema
+                    assert "type" in p_schema["items"]
 
 
 def test_openai_format_messages_and_tools():

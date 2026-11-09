@@ -1182,7 +1182,11 @@ class AgentToolRegistry:
                 parameters={
                     "type": "object",
                     "properties": {
-                        "active_version_tasks": {"type": "array", "description": "Tasks from active version"},
+                        "active_version_tasks": {
+                            "type": "array",
+                            "items": {"type": "object", "properties": {}},
+                            "description": "Tasks from active version",
+                        },
                         "proposed_plan": {"type": "object", "description": "Proposed plan dict from planner engine"},
                     },
                     "required": ["active_version_tasks", "proposed_plan"],
@@ -1260,13 +1264,15 @@ class AgentToolRegistry:
 
     def export_gemini_tools(self) -> list[dict[str, Any]]:
         """Export tool signatures formatted for the Google Gemini Tool Calling API."""
+        from app.agent.providers import normalize_gemini_schema
+
         return [
             {
                 "function_declarations": [
                     {
                         "name": td.name,
                         "description": td.description,
-                        "parameters": td.parameters,
+                        "parameters": normalize_gemini_schema(td.parameters),
                     }
                     for td in self.get_tool_definitions()
                 ]
