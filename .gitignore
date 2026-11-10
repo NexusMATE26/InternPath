@@ -19,5 +19,6 @@ CMakeFiles/
 data/private/
 *.db
 *.db.*
+*.db-*
 *.sqlite3
 *.tsbuildinfo
